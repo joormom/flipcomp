@@ -1,0 +1,13 @@
+# scraped data, run history and reports contain real owners' names and addresses
+.cache/
+reports/
+*.log
+*.csv
+
+# personal settings
+prefs.json
+
+# python
+__pycache__/
+*.pyc
+.venv/

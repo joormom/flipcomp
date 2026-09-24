@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlipComp</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e8eaed; --dim:#9aa3b2; --faint:#6b7483;
+    --accent:#4ea1ff; --good:#3ddc97; --warn:#ffb648; --bad:#ff6b6b;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+  header{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+  h1{font-size:23px;margin:0;letter-spacing:-.3px}
+  header .tag{color:var(--faint);font-size:13px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:18px;margin-bottom:16px}
+  .card h2{margin:0 0 14px;font-size:13px;text-transform:uppercase;
+           letter-spacing:.9px;color:var(--dim);font-weight:600}
+
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:140px}
+  label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:inherit}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  button{background:var(--accent);color:#07121f;border:0;border-radius:8px;
+    padding:11px 22px;font-size:14px;font-weight:650;cursor:pointer;font-family:inherit}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:transparent;color:var(--dim);border:1px solid var(--line);font-weight:500}
+
+  details.adv{margin-top:14px}
+  details.adv>summary{cursor:pointer;color:var(--dim);font-size:13px;user-select:none}
+  details.adv[open]>summary{margin-bottom:14px}
+  .grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}
+  .chip{font-size:12px;padding:6px 11px;border:1px solid var(--line);border-radius:999px;
+    cursor:pointer;color:var(--dim);user-select:none}
+  .chip.on{background:rgba(78,161,255,.16);border-color:var(--accent);color:var(--accent)}
+
+  .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;
+        background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .hero div{background:var(--panel);padding:16px 18px}
+  .hero .k{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--faint)}
+  .hero .v{font-size:27px;font-weight:680;margin-top:5px;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+  .hero .s{font-size:12px;color:var(--dim);margin-top:3px}
+
+  .verdict{border-radius:12px;padding:16px 18px;margin-bottom:16px;border:1px solid}
+  .verdict .c{font-weight:750;font-size:16px;letter-spacing:.4px}
+  .verdict .d{font-size:14px;margin-top:6px;line-height:1.55}
+  .v-good{background:rgba(61,220,151,.09);border-color:rgba(61,220,151,.35)}
+  .v-good .c{color:var(--good)}
+  .v-warn{background:rgba(255,182,72,.09);border-color:rgba(255,182,72,.35)}
+  .v-warn .c{color:var(--warn)}
+  .v-bad{background:rgba(255,107,107,.09);border-color:rgba(255,107,107,.35)}
+  .v-bad .c{color:var(--bad)}
+  .v-neutral{background:var(--panel2);border-color:var(--line)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:9px 8px;border-bottom:1px solid var(--line);
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+  th{color:var(--faint);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  th:first-child,td:first-child{text-align:left;white-space:normal;min-width:150px}
+  tbody tr:hover{background:rgba(255,255,255,.025)}
+  .pos{color:var(--good)} .neg{color:var(--bad)} .dimtxt{color:var(--dim)}
+  .tblwrap{overflow-x:auto}
+
+  .flag{display:flex;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .flag:last-child{border-bottom:0}
+  .flag .dot{width:7px;height:7px;border-radius:50%;margin-top:7px;flex:0 0 auto}
+  .f-high .dot{background:var(--bad)} .f-medium .dot{background:var(--warn)}
+  .f-low .dot{background:var(--dim)} .f-info .dot{background:var(--accent)}
+  .flag .t{font-weight:600;font-size:13.5px}
+  .flag .x{font-size:13px;color:var(--dim);margin-top:2px;line-height:1.5}
+
+  .bar{height:5px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:7px}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.split{grid-template-columns:1fr}}
+  .muted{color:var(--dim);font-size:13px}
+  .err{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.4);
+       color:#ffc9c9;padding:13px 15px;border-radius:10px;margin-bottom:16px;font-size:14px}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.25);
+    border-top-color:#07121f;border-radius:50%;animation:sp .7s linear infinite;
+    vertical-align:-2px;margin-right:7px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .addr{font-size:15px;font-weight:600}
+  .sub{color:var(--dim);font-size:13px;margin-top:3px}
+  .pill{display:inline-block;font-size:11px;padding:3px 9px;border-radius:999px;
+        background:var(--panel2);color:var(--dim);margin-left:7px;vertical-align:2px}
+  .modes{display:flex;gap:6px}
+  .mode{background:transparent;border:1px solid var(--line);color:var(--dim);
+        font-size:13px;font-weight:500;padding:7px 14px}
+  .mode.on{background:rgba(78,161,255,.14);border-color:var(--accent);color:var(--accent)}
+  .deal{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;
+        background:var(--panel2)}
+  .deal-top{display:flex;justify-content:space-between;gap:14px;align-items:baseline;flex-wrap:wrap}
+  .deal-addr{font-weight:600;font-size:14.5px}
+  .deal-num{display:flex;gap:20px;flex-wrap:wrap;margin-top:9px;font-size:13px}
+  .deal-num div span{display:block;color:var(--faint);font-size:11px;
+        text-transform:uppercase;letter-spacing:.6px}
+  .deal-num div b{font-variant-numeric:tabular-nums;font-size:14px}
+  .badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;letter-spacing:.4px}
+  .b-good{background:rgba(61,220,151,.16);color:var(--good)}
+  .b-warn{background:rgba(255,182,72,.16);color:var(--warn)}
+  .b-bad{background:rgba(255,107,107,.16);color:var(--bad)}
+  .tagc{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin:2px 4px 2px 0;
+        background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+  .tagc.hot{color:var(--bad);border-color:rgba(255,107,107,.4)}
+  .sub a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>FlipComp</h1>
+    <span class="tag">ARV comping &amp; max-offer analysis for residential flips</span>
+    <span style="flex:1"></span>
+    <div class="modes">
+      <button class="mode on" id="mode-one">Analyze an address</button>
+      <button class="mode" id="mode-find">Find deals</button>
+      <button class="mode" id="mode-leads">Leads</button>
+      <button class="mode" id="mode-record">Property record</button>
+    </div>
+  </header>
+
+  <div class="card" id="record-panel" style="display:none">
+    <div class="row">
+      <div style="flex:3;min-width:280px">
+        <label>Address you drove past</label>
+        <input id="r_address" placeholder="717 SW Hickory Ave, Bartlesville, OK" autocomplete="off">
+      </div>
+      <div style="flex:1;min-width:180px">
+        <label>County</label>
+        <select id="r_county"><option value="">Auto from city</option></select>
+      </div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <button id="r_go">Look up</button>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:11px">
+      Who owns it, where their mail goes, whether they are paying the county, how title has
+      moved, any listing history, and one-click links to the deed index, court records and
+      skip-trace. Public records only: phone numbers are not public, so those are handed off.
+    </div>
+  </div>
+
+  <div class="card" id="leads-panel" style="display:none">
+    <div class="row">
+      <div style="flex:2;min-width:220px">
+        <label>Home county</label>
+        <select id="l_county"></select>
+      </div>
+      <div><label>Resolve delinquent parcels (max)</label><input id="l_tax" placeholder="250" inputmode="numeric"></div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end;gap:8px">
+        <button id="l_go">Find leads</button>
+        <button id="l_new" class="ghost" title="From the history store, no scan">What's new</button>
+      </div>
+    </div>
+    <div class="chips" style="margin-top:12px">
+      <span class="chip on" id="l_adjacent">Include neighbouring counties</span>
+      <span class="chip" id="l_metro">Include Tulsa County (large metro)</span>
+      <span style="flex:1"></span>
+      <span class="chip" data-days="1">1 day</span>
+      <span class="chip" data-days="3">3 days</span>
+      <span class="chip on" data-days="7">7 days</span>
+      <span class="chip" data-days="30">30 days</span>
+    </div>
+    <div class="muted" style="margin-top:11px">
+      Hunts for properties whose owners are under pressure before it becomes a price:
+      unpaid property tax and city liens from the county treasurer, expired listings,
+      listings whose wording gives the game away, price cuts between scans, and
+      court filings (foreclosure, probate, divorce) with a one-time browser check.
+    </div>
+  </div>
+
+  <div class="card" id="find-panel" style="display:none">
+    <div class="row">
+      <div style="flex:2;min-width:220px">
+        <label>Home county</label>
+        <select id="f_county"></select>
+      </div>
+      <div><label>Min price</label><input id="f_min_price" placeholder="30000" inputmode="numeric"></div>
+      <div><label>Max price</label><input id="f_max_price" placeholder="400000" inputmode="numeric"></div>
+      <div><label>Min sqft</label><input id="f_min_sqft" placeholder="700" inputmode="numeric"></div>
+      <div><label>Comp-verify top</label><input id="f_verify" placeholder="8" inputmode="numeric"></div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <button id="f_go">Scan region</button>
+      </div>
+    </div>
+    <div class="chips" style="margin-top:12px">
+      <span class="chip on" id="f_adjacent">Include neighbouring counties</span>
+      <span class="chip" id="f_metro">Include Tulsa County (large metro)</span>
+    </div>
+    <div class="muted" style="margin-top:11px">
+      Scans every active listing in the region against the last 12 months of sales,
+      ranks them by how far your maximum offer sits above the asking price, then runs
+      the full comp analysis on the strongest. Takes a couple of minutes on a cold cache.
+    </div>
+  </div>
+
+  <div class="card" id="skip-panel" style="display:none;padding:12px 18px">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:3;min-width:240px">
+        <label>Places to skip everywhere (towns or counties, comma-separated)</label>
+        <input id="skip_places" placeholder="Chelsea, Nowata" autocomplete="off">
+      </div>
+      <div style="flex:0 0 auto"><button id="skip_save" class="ghost">Save</button></div>
+      <div id="skip_note" class="muted" style="flex:2;min-width:200px"></div>
+    </div>
+  </div>
+
+  <div class="card" id="one-panel">
+    <div class="row">
+      <div style="flex:3;min-width:280px">
+        <label>Property address</label>
+        <input id="address" placeholder="123 Main St, Cleveland, OH" autocomplete="off">
+      </div>
+      <div style="flex:1">
+        <label>Asking price (optional)</label>
+        <input id="asking" placeholder="auto from listing" inputmode="numeric">
+      </div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <button id="go">Analyze</button>
+      </div>
+    </div>
+
+    <details class="adv" id="adv">
+      <summary>Assumptions &amp; renovation scope</summary>
+
+      <div class="grid4" style="margin-bottom:14px">
+        <div>
+          <label>Renovation scope</label>
+          <select id="rehab_tier"><option value="">Auto-suggest</option></select>
+        </div>
+        <div>
+          <label>Or enter a total rehab $</label>
+          <input id="rehab_override_total" placeholder="contractor bid" inputmode="numeric">
+        </div>
+        <div>
+          <label>Contingency %</label>
+          <input id="rehab_contingency_pct" placeholder="15" inputmode="numeric">
+        </div>
+        <div>
+          <label>Target profit % of ARV</label>
+          <input id="target_profit_pct" placeholder="15" inputmode="numeric">
+        </div>
+      </div>
+
+      <label>Known big-ticket items</label>
+      <div class="chips" id="lineitems"></div>
+
+      <div class="grid4" style="margin-top:16px">
+        <div><label>Hold (months)</label><input id="hold_months" placeholder="6" inputmode="numeric"></div>
+        <div><label>Agent commission %</label><input id="agent_commission_pct" placeholder="5" inputmode="numeric"></div>
+        <div><label>Transfer tax % (sell)</label><input id="transfer_tax_pct" placeholder="from state" inputmode="numeric"></div>
+        <div><label>Buy closing %</label><input id="buy_closing_pct" placeholder="1.5" inputmode="numeric"></div>
+        <div><label>Interest rate %</label><input id="interest_rate_pct" placeholder="10.5" inputmode="numeric"></div>
+        <div><label>Points %</label><input id="points_pct" placeholder="2" inputmode="numeric"></div>
+        <div><label>Loan to purchase %</label><input id="loan_to_purchase_pct" placeholder="85" inputmode="numeric"></div>
+        <div><label>Min profit $</label><input id="min_profit_flat" placeholder="25000" inputmode="numeric"></div>
+        <div>
+          <label>Financing</label>
+          <select id="cash_purchase">
+            <option value="">Hard money</option>
+            <option value="1">All cash</option>
+          </select>
+        </div>
+        <div><label>Subject sqft override</label><input id="subject_sqft" placeholder="from listing" inputmode="numeric"></div>
+        <div><label>Annual taxes $</label><input id="annual_taxes" placeholder="from listing" inputmode="numeric"></div>
+        <div><label>Annual insurance $</label><input id="annual_insurance" placeholder="1800" inputmode="numeric"></div>
+      </div>
+    </details>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => n===null||n===undefined||isNaN(n) ? "--" : "$" + Math.round(n).toLocaleString();
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const sign = n => (n>=0?"pos":"neg");
+
+const OFFER_KEYS = ["hold_months","agent_commission_pct","transfer_tax_pct","buy_closing_pct",
+  "interest_rate_pct","points_pct","loan_to_purchase_pct","min_profit_flat","target_profit_pct",
+  "annual_taxes","annual_insurance"];
+let CONFIG = null, CHOSEN = new Set();
+
+async function boot(){
+  CONFIG = await (await fetch("/api/config")).json();
+  const sel = $("rehab_tier");
+  for(const [k,v] of Object.entries(CONFIG.tiers)){
+    const o = document.createElement("option");
+    o.value = k; o.textContent = `${v.label} (~$${v.psf}/sqft national)`;
+    o.title = v.desc; sel.appendChild(o);
+  }
+  const box = $("lineitems");
+  for(const [k,v] of Object.entries(CONFIG.line_items)){
+    const c = document.createElement("span");
+    c.className = "chip"; c.textContent = v.label; c.dataset.key = k;
+    c.onclick = () => { c.classList.toggle("on");
+      CHOSEN.has(k) ? CHOSEN.delete(k) : CHOSEN.add(k); };
+    box.appendChild(c);
+  }
+}
+
+function overrides(){
+  const o = {};
+  for(const k of OFFER_KEYS) if($(k).value.trim()) o[k] = $(k).value.trim();
+  for(const k of ["rehab_contingency_pct","rehab_override_total","subject_sqft"])
+    if($(k).value.trim()) o[k] = $(k).value.trim();
+  if($("rehab_tier").value) o.rehab_tier = $("rehab_tier").value;
+  if($("cash_purchase").value) o.cash_purchase = true;
+  if(CHOSEN.size) o.rehab_line_items = [...CHOSEN];
+  return o;
+}
+
+async function run(){
+  const address = $("address").value.trim();
+  if(!address){ $("address").focus(); return; }
+  const btn = $("go");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Pulling comps';
+  $("out").innerHTML = '<div class="card"><span class="muted">Looking up the property, '
+    + 'pulling recent sales nearby, and adjusting comps. First run in a new market '
+    + 'takes 20-60 seconds.</span></div>';
+  try{
+    const res = await fetch("/api/analyze", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({address, asking_price: $("asking").value.replace(/[^0-9.]/g,""),
+                            overrides: overrides()})
+    });
+    const data = await res.json();
+    if(!res.ok){ $("out").innerHTML = `<div class="err">${esc(data.error||"Request failed.")}</div>`; }
+    else render(data);
+  }catch(e){
+    $("out").innerHTML = `<div class="err">Could not reach the server: ${esc(e.message)}</div>`;
+  }finally{ btn.disabled = false; btn.textContent = "Analyze"; }
+}
+
+function render(d){
+  const s=d.subject, a=d.arv, r=d.rehab, o=d.offer, v=d.verdict;
+  const tone = {good:"v-good",warn:"v-warn",bad:"v-bad",neutral:"v-neutral"}[v.tone]||"v-neutral";
+  let h = "";
+
+  h += `<div class="verdict ${tone}"><div class="c">${esc(v.call)}</div>
+        <div class="d">${esc(v.detail)}</div></div>`;
+
+  h += `<div class="card"><div class="addr">${esc(s.formatted_address||"")}
+        <span class="pill">${esc((s.style||"").replace(/_/g," ").toLowerCase())}</span></div>
+        <div class="sub">${s.beds??"?"} bd &middot; ${s.full_baths??"?"} ba
+        ${s.half_baths?"+ "+s.half_baths+" half":""} &middot;
+        ${s.sqft?Math.round(s.sqft).toLocaleString()+" sqft":"sqft unknown"} &middot;
+        built ${s.year_built?Math.round(s.year_built):"?"}
+        ${s.lot_sqft?" &middot; "+Math.round(s.lot_sqft).toLocaleString()+" sqft lot":""}
+        ${d.asking_price?" &middot; asking "+fmt(d.asking_price):""}</div></div>`;
+
+  h += `<div class="hero">
+    <div><div class="k">ARV (resale)</div><div class="v">${fmt(a.arv)}</div>
+      <div class="s">${fmt(a.arv_low)} &ndash; ${fmt(a.arv_high)}${a.arv_psf?" &middot; $"+a.arv_psf+"/sqft":""}</div></div>
+    <div><div class="k">Renovation</div><div class="v">${fmt(r.total)}</div>
+      <div class="s">${esc(r.tier_label)}${r.psf_all_in?" &middot; $"+r.psf_all_in+"/sqft":""}</div></div>
+    <div><div class="k">Max offer</div><div class="v">${o.feasible?fmt(o.mao):"&mdash;"}</div>
+      <div class="s">${o.feasible?"to net "+fmt(o.target_profit):"no viable price"}</div></div>
+    <div><div class="k">Confidence</div><div class="v">${a.confidence}<span style="font-size:15px;color:var(--faint)">/100</span></div>
+      <div class="s">${esc(a.confidence_label)} &middot; ${a.comp_count} comps</div>
+      <div class="bar"><i style="width:${a.confidence}%"></i></div></div>
+  </div>`;
+
+  if(d.flags && d.flags.length){
+    h += `<div class="card"><h2>Check before you offer</h2>`;
+    for(const f of d.flags)
+      h += `<div class="flag f-${esc(f.level)}"><span class="dot"></span><div>
+            <div class="t">${esc(f.title)}</div><div class="x">${esc(f.detail)}</div></div></div>`;
+    h += `</div>`;
+  }
+
+  // --- offer ladder ---
+  h += `<div class="split">`;
+  h += `<div class="card"><h2>What to offer</h2><div class="tblwrap"><table><tbody>`;
+  const ladder = [
+    ["Suggested opening offer", o.suggested_opening, "leaves negotiating room"],
+    ["Maximum allowable offer", o.feasible?o.mao:null, "walk away above this"],
+    ["70% rule check", o.rule_70, "the familiar rule of thumb"],
+    ["Asking price", d.asking_price, ""],
+  ];
+  for(const [k,val,note] of ladder)
+    h += `<tr><td>${k}${note?`<div class="sub">${note}</div>`:""}</td>
+          <td style="font-size:15px;font-weight:600">${val?fmt(val):"&mdash;"}</td></tr>`;
+  h += `</tbody></table></div></div>`;
+
+  // --- profit ---
+  const m = o.at_mao, k = o.at_asking;
+  h += `<div class="card"><h2>Profit</h2><div class="tblwrap"><table>
+        <thead><tr><th></th><th>At max offer</th>${k?"<th>At asking</th>":""}</tr></thead><tbody>`;
+  const rows = [
+    ["Purchase", x=>fmt(x.purchase_price)],
+    ["Renovation", x=>fmt(x.rehab)],
+    ["Buy closing", x=>fmt(x.buy_closing)],
+    ["Holding ("+(m.holding.months)+" mo)", x=>fmt(x.holding.total)],
+    ["Financing", x=>fmt(x.financing.total)],
+    ["Selling costs", x=>fmt(x.selling.total)],
+  ];
+  for(const [lbl,fn] of rows)
+    h += `<tr><td class="dimtxt">${lbl}</td><td>${fn(m)}</td>${k?`<td>${fn(k)}</td>`:""}</tr>`;
+  h += `<tr><td><b>Net profit</b></td>
+        <td class="${sign(m.profit)}"><b>${fmt(m.profit)}</b></td>
+        ${k?`<td class="${sign(k.profit)}"><b>${fmt(k.profit)}</b></td>`:""}</tr>`;
+  h += `<tr><td class="dimtxt">Margin on ARV</td><td>${m.profit_margin_pct}%</td>
+        ${k?`<td>${k.profit_margin_pct}%</td>`:""}</tr>`;
+  h += `<tr><td class="dimtxt">Cash required</td><td>${fmt(m.cash_required)}</td>
+        ${k?`<td>${fmt(k.cash_required)}</td>`:""}</tr>`;
+  h += `<tr><td class="dimtxt">Return on cash</td><td>${m.roi_pct}%</td>
+        ${k?`<td>${k.roi_pct}%</td>`:""}</tr>`;
+  h += `</tbody></table></div>`;
+
+  const L = d.location || {}, AS = d.assumptions || {};
+  if(L.state){
+    const taxNote = {listing:"from the listing", "state rate":"estimated from the state rate",
+                     "county roll":"from the county treasurer's roll",
+                     manual:"as you entered"}[L.property_tax_source] || "";
+    const TR = d.tax_roll || {};
+    const trNote = TR.found ? ` &middot; owner of record <b>${esc(TR.owner||"")}</b>`
+      + (TR.years_behind ? `, <span class="neg">${TR.years_behind} yr behind (${fmt(TR.tax_owed)})</span>` : ", taxes current")
+      + (TR.special_assessments_owed ? `, <span class="neg">city liens ${fmt(TR.special_assessments_owed)}</span>` : "")
+      + (TR.detail_url ? ` &middot; <a href="${esc(TR.detail_url)}" target="_blank" rel="noopener">tax roll</a>` : "") : "";
+    h += `<div class="muted" style="margin-top:11px;line-height:1.6">
+      <b>${esc(L.state)} cost basis:</b> transfer tax ${L.transfer_tax_pct}%
+      (${esc(L.transfer_payer)}${L.buy_transfer_pct?`, so ${L.buy_transfer_pct}% on the buy too`:""})
+      &middot; commission ${AS.agent_commission_pct}%
+      &middot; property tax ${fmt(L.annual_taxes_used)}/yr ${taxNote}${trNote}.</div>`;
+  }
+  h += `</div></div>`;
+
+  // --- stress ---
+  const st = o.stress;
+  h += `<div class="card"><h2>If things go wrong (buying at max offer)</h2><div class="tblwrap"><table>
+    <thead><tr><th>Scenario</th><th>Profit</th><th>Margin</th></tr></thead><tbody>
+    <tr><td>ARV lands at the low end (${fmt(a.arv_low)})</td>
+        <td class="${sign(st.arv_low.profit)}">${fmt(st.arv_low.profit)}</td><td>${st.arv_low.profit_margin_pct}%</td></tr>
+    <tr><td>Renovation runs 25% over</td>
+        <td class="${sign(st.rehab_overrun_25.profit)}">${fmt(st.rehab_overrun_25.profit)}</td><td>${st.rehab_overrun_25.profit_margin_pct}%</td></tr>
+    <tr><td>Both at once</td>
+        <td class="${sign(st.both.profit)}">${fmt(st.both.profit)}</td><td>${st.both.profit_margin_pct}%</td></tr>
+  </tbody></table></div></div>`;
+
+  // --- rehab breakdown ---
+  h += `<div class="card"><h2>Renovation budget &mdash; ${esc(r.tier_label)}</h2>`;
+  if(r.suggested_reason) h += `<div class="muted" style="margin-bottom:10px">${esc(r.suggested_reason)}</div>`;
+  h += `<div class="tblwrap"><table><tbody>`;
+  for(const b of r.breakdown)
+    h += `<tr><td class="dimtxt">${esc(b.label)}</td><td>${fmt(b.amount)}</td></tr>`;
+  h += `<tr><td><b>Total</b></td><td><b>${fmt(r.total)}</b></td></tr></tbody></table></div>`;
+  if(r.market_factor && r.market_factor!==1)
+    h += `<div class="muted" style="margin-top:9px">Rates scaled to ${r.market_factor}x national
+          average for this price point.</div>`;
+  h += `</div>`;
+
+  // --- comps ---
+  h += `<div class="card"><h2>Comparable sales</h2>
+    <div class="muted" style="margin-bottom:11px">
+      ${a.comp_count} of ${a.pool_size} nearby sales, within ${a.criteria.radius_mi} mi and
+      ${a.criteria.max_months_old} months. Local trend ${a.market_trend_annual_pct}%/yr.
+      Each sale is adjusted to match the subject, then weighted by distance, recency and similarity.
+    </div><div class="tblwrap"><table>
+    <thead><tr><th>Address</th><th>Sold</th><th>Ago</th><th>Dist</th><th>Sqft</th><th>Bd</th>
+    <th>Built</th><th>Adjust</th><th>Adjusted</th><th>Weight</th></tr></thead><tbody>`;
+  for(const c of a.comps){
+    h += `<tr><td>${esc(c.formatted_address||"")}</td>
+      <td>${fmt(c.sold_price)}</td><td class="dimtxt">${c.months_ago}mo</td>
+      <td class="dimtxt">${c.distance_mi}mi</td>
+      <td>${c.sqft?Math.round(c.sqft).toLocaleString():"--"}</td>
+      <td>${c.beds??"--"}</td><td class="dimtxt">${c.year_built?Math.round(c.year_built):"--"}</td>
+      <td class="${sign(c.net_adjustment)}">${c.net_adjustment>=0?"+":""}${fmt(c.net_adjustment)}</td>
+      <td><b>${fmt(c.adjusted_value)}</b></td>
+      <td class="dimtxt">${c.weight_pct}%</td></tr>`;
+  }
+  h += `</tbody></table></div>
+    <div class="muted" style="margin-top:11px">Sales data from Realtor.com MLS listings.
+    This is an automated estimate, not an appraisal.</div></div>`;
+
+  $("out").innerHTML = h;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+// ---------- region deal search ----------
+const MODES = {one:"one-panel", find:"find-panel", leads:"leads-panel", record:"record-panel"};
+$("mode-record").onclick = () => setMode("record");
+function setMode(name, keepOut){
+  for(const [k,id] of Object.entries(MODES)){
+    $(id).style.display = (k===name) ? "" : "none";
+    $("mode-"+k).classList.toggle("on", k===name);
+  }
+  // The skip list only matters where a whole region is scanned.
+  $("skip-panel").style.display = (name==="find" || name==="leads") ? "" : "none";
+  if(!keepOut) $("out").innerHTML = "";
+}
+
+async function loadSkips(){
+  try{
+    const p = await (await fetch("/api/prefs")).json();
+    $("skip_places").value = (p.exclude_cities||[]).map(c => c.replace(/\b\w/g, m => m.toUpperCase())).join(", ");
+    $("skip_note").textContent = (p.exclude_counties||[]).length
+      ? `Whole county skipped: ${p.exclude_counties.map(c => c[0].toUpperCase()+c.slice(1)).join(", ")}` : "";
+  }catch(e){}
+}
+$("skip_save").onclick = async () => {
+  const btn = $("skip_save"); btn.disabled = true;
+  try{
+    const res = await fetch("/api/prefs", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({exclude: $("skip_places").value})});
+    const p = await res.json();
+    await loadSkips();
+    $("skip_note").textContent = `Saved. ${p.purged||0} tracked properties removed.`
+      + ((p.exclude_counties||[]).length ? ` Whole county skipped: ${p.exclude_counties.join(", ")}.` : "");
+  }finally{ btn.disabled = false; }
+};
+$("mode-one").onclick = () => setMode("one");
+$("mode-find").onclick = () => setMode("find");
+$("mode-leads").onclick = () => setMode("leads");
+for(const id of ["f_adjacent","f_metro","l_adjacent","l_metro"])
+  $(id).onclick = () => $(id).classList.toggle("on");
+
+function bootCounties(){
+  for(const [k,v] of Object.entries(CONFIG.counties || {})){
+    const o = document.createElement("option"); o.value = k; o.textContent = v.name; $("r_county").appendChild(o);
+  }
+  for(const selId of ["f_county","l_county"]){
+    const sel = $(selId);
+    for(const [k,v] of Object.entries(CONFIG.counties || {})){
+      const o = document.createElement("option");
+      o.value = k; o.textContent = `${v.name} — ${v.seat}`;
+      if(k === CONFIG.default_county) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+}
+
+// Any "comp it" link anywhere: jump to the address tab and run the full analysis.
+document.addEventListener("click", e => {
+  const a = e.target.closest(".analyze-link");
+  if(!a) return;
+  e.preventDefault();
+  setMode("one", true);
+  $("address").value = a.dataset.addr || "";
+  $("asking").value = a.dataset.price || "";
+  run();
+});
+
+async function runSearch(){
+  const btn = $("f_go");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Scanning';
+  $("out").innerHTML = '<div class="card"><span class="muted">Pulling every active '
+    + 'listing and 12 months of sales for the region, screening them, then running the '
+    + 'full comp analysis on the best. This takes a couple of minutes the first time; '
+    + 'later scans of the same region are much faster.</span></div>';
+  try{
+    const res = await fetch("/api/search", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        county: $("f_county").value,
+        include_adjacent: $("f_adjacent").classList.contains("on"),
+        include_metro: $("f_metro").classList.contains("on"),
+        min_price: $("f_min_price").value.replace(/[^0-9.]/g,""),
+        max_price: $("f_max_price").value.replace(/[^0-9.]/g,""),
+        min_sqft: $("f_min_sqft").value.replace(/[^0-9.]/g,""),
+        verify_top: $("f_verify").value.replace(/[^0-9]/g,"") || 8,
+      })
+    });
+    const data = await res.json();
+    if(!res.ok) $("out").innerHTML = `<div class="err">${esc(data.error||"Scan failed.")}</div>`;
+    else renderSearch(data);
+  }catch(e){
+    $("out").innerHTML = `<div class="err">Could not reach the server: ${esc(e.message)}</div>`;
+  }finally{ btn.disabled = false; btn.textContent = "Scan region"; }
+}
+$("f_go").onclick = runSearch;
+
+function verdictClass(v){
+  if(!v) return "b-warn";
+  if(v.startsWith("PURSUE") && !v.includes("CAUTION")) return "b-good";
+  if(v === "PASS" || v === "NOT VIABLE") return "b-bad";
+  return "b-warn";
+}
+
+function renderSearch(d){
+  const ver = d.verified || [];
+  const seen = new Set(ver.map(v => v.address));
+  const rest = (d.candidates||[]).filter(c => !seen.has(c.address));
+  let h = diffBlock(d.diff, "Deal scan");
+
+  h += `<div class="card"><h2>Region scanned</h2>
+    <div class="muted">${esc((d.counties||[]).join(" &middot; "))}</div>
+    <div class="deal-num" style="margin-top:12px">
+      <div><span>Listings screened</span><b>${(d.active_screened||0).toLocaleString()}</b></div>
+      <div><span>Sales compared</span><b>${(d.sold_pool||0).toLocaleString()}</b></div>
+      <div><span>Region median</span><b>$${d.market_psf}/sqft</b></div>
+      <div><span>Cleared screen</span><b>${d.total_candidates||0}</b></div>
+      <div><span>Comp-verified</span><b>${ver.length}</b></div>
+    </div></div>`;
+
+  if(ver.length){
+    h += `<div class="card"><h2>Comp-verified candidates</h2>`;
+    for(const v of ver){
+      if(!v.verified){
+        h += `<div class="deal"><div class="deal-top"><span class="deal-addr">${esc(v.address)}</span>
+              <span class="badge b-warn">SKIPPED</span></div>
+              <div class="muted" style="margin-top:6px">${esc(v.verify_error||"")}</div></div>`;
+        continue;
+      }
+      h += `<div class="deal">
+        <div class="deal-top">
+          <span class="deal-addr">${esc(v.address)}</span>
+          <span class="badge ${verdictClass(v.verdict)}">${esc(v.verdict)}</span>
+        </div>
+        <div class="sub">${v.beds??"?"} bd &middot; ${v.baths??"?"} ba &middot;
+          ${(v.sqft||0).toLocaleString()} sqft &middot; built ${v.year_built||"?"}
+          ${v.days_on_mls?` &middot; ${v.days_on_mls} days on market`:""}
+          ${v.city?` &middot; ${esc(v.city)}`:""}</div>
+        <div class="deal-num">
+          <div><span>Asking</span><b>${fmt(v.price)}</b></div>
+          <div><span>ARV</span><b>${fmt(v.arv)}</b></div>
+          <div><span>Rehab</span><b>${fmt(v.rehab)}</b></div>
+          <div><span>Max offer</span><b class="${v.feasible?"pos":"neg"}">${v.feasible?fmt(v.mao):"&mdash;"}</b></div>
+          <div><span>Profit at max</span><b>${fmt(v.profit_at_mao)}</b></div>
+          <div><span>Downside</span><b class="${(v.downside>=0)?"pos":"neg"}">${fmt(v.downside)}</b></div>
+          <div><span>Confidence</span><b>${v.confidence}/100 &middot; ${v.comp_count} comps</b></div>
+        </div>`;
+      const top = (v.flags||[]).filter(f => f.level==="high"||f.level==="medium").slice(0,2);
+      for(const f of top)
+        h += `<div class="flag f-${esc(f.level)}" style="border:0;padding:7px 0 0">
+              <span class="dot"></span><div class="t" style="font-size:13px">${esc(f.title)}</div></div>`;
+      if(v.url) h += `<div style="margin-top:9px"><a href="${esc(v.url)}" target="_blank"
+                      rel="noopener" style="font-size:12.5px">View listing &rarr;</a></div>`;
+      h += `</div>`;
+    }
+    h += `</div>`;
+  }
+
+  if(rest.length){
+    h += `<div class="card"><h2>Screened only &mdash; not comp-verified</h2>
+      <div class="muted" style="margin-bottom:11px">Estimated ARV here is a fast
+      neighbourhood median, not a comp analysis. Raise "comp-verify top" or paste one
+      into the address tab to check it properly.</div><div class="tblwrap"><table>
+      <thead><tr><th>Address</th><th>Asking</th><th>Est ARV</th><th>Est rehab</th>
+      <th>Est max offer</th><th>Spread</th><th>Comps</th></tr></thead><tbody>`;
+    for(const c of rest)
+      h += `<tr><td>${c.url?`<a href="${esc(c.url)}" target="_blank" rel="noopener"
+          style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--faint)">${esc(c.address)}</a>`:esc(c.address)}
+        <div class="sub">${esc(c.city||"")}${c.year_built?" &middot; built "+c.year_built:""}
+        ${c.url?` &middot; <a href="${esc(c.url)}" target="_blank" rel="noopener">listing &rarr;</a>`:""}
+        &middot; <a href="#" class="analyze-link" data-addr="${esc(c.address)}" data-price="${c.price||""}">comp it</a></div></td>
+        <td>${fmt(c.price)}</td><td>${fmt(c.est_arv)}</td><td>${fmt(c.est_rehab)}</td>
+        <td>${fmt(c.est_mao)}</td><td class="${sign(c.spread)}">${fmt(c.spread)}</td>
+        <td class="dimtxt">${c.screen_comps}</td></tr>`;
+    h += `</tbody></table></div></div>`;
+  }
+
+  if(!ver.length && !rest.length)
+    h += `<div class="card"><span class="muted">No listings in this region cleared the
+          screen. Try widening the price range or including neighbouring counties.</span></div>`;
+
+  $("out").innerHTML = h;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+// ---------- leads ----------
+const TAG_LABEL = {
+  foreclosure:"foreclosure", short_sale:"short sale", auction:"auction", estate:"estate",
+  investor:"needs work", as_is:"as-is", cash_only:"cash only", damage:"damage",
+  motivated:"motivated", price_cut_text:"reduced", vacant:"vacant", life_event:"life event",
+  tenant:"tenant", stale:"stale", below_last_sale:"below last sale", price_cut:"price cut",
+  under_avm:"under estimate", expired:"expired", tax_3yr:"3yr tax", tax_2yr:"2yr tax",
+  tax_1yr:"1yr tax", city_lien:"city lien", absentee:"absentee",
+};
+const HOT = new Set(["foreclosure","short_sale","auction","tax_3yr","city_lien","estate"]);
+function tagChips(tags){
+  return (tags||[]).map(t => `<span class="tagc ${HOT.has(t)?"hot":""}">${esc(TAG_LABEL[t]||t)}</span>`).join("");
+}
+function mapLink(addr){
+  return `<a href="https://www.google.com/maps/search/${encodeURIComponent(addr||"")}" target="_blank" rel="noopener">map</a>`;
+}
+function leadLinks(l){
+  const bits = [];
+  if(l.url) bits.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener">listing</a>`);
+  if(l.listing_url) bits.push(`<a href="${esc(l.listing_url)}" target="_blank" rel="noopener">listing</a>`);
+  if(l.detail_url) bits.push(`<a href="${esc(l.detail_url)}" target="_blank" rel="noopener">tax roll</a>`);
+  if(l.address) bits.push(mapLink(l.address));
+  if(l.address) bits.push(`<a href="#" class="analyze-link" data-addr="${esc(l.address)}" data-price="${l.price||l.listing_price||""}">comp it</a>`);
+  return bits.join(" &middot; ");
+}
+function scoreBadge(s){
+  const cls = s>=70 ? "b-bad" : s>=40 ? "b-warn" : "b-good";
+  return `<span class="badge ${cls}" title="lead score">${s}</span>`;
+}
+
+async function runLeads(){
+  const btn = $("l_go");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Hunting';
+  $("out").innerHTML = '<div class="card"><span class="muted">Reading active and expired '
+    + 'listings, pulling the county tax roll, resolving delinquent parcels to addresses, '
+    + 'and cross-referencing. A cold run takes one to three minutes.</span></div>';
+  try{
+    const res = await fetch("/api/leads", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        county: $("l_county").value,
+        include_adjacent: $("l_adjacent").classList.contains("on"),
+        include_metro: $("l_metro").classList.contains("on"),
+        tax_details: $("l_tax").value.replace(/[^0-9]/g,"") || 250,
+      })
+    });
+    const data = await res.json();
+    if(!res.ok) $("out").innerHTML = `<div class="err">${esc(data.error||"Lead search failed.")}</div>`;
+    else renderLeads(data);
+  }catch(e){
+    $("out").innerHTML = `<div class="err">Could not reach the server: ${esc(e.message)}</div>`;
+  }finally{ btn.disabled = false; btn.textContent = "Find leads"; }
+}
+$("l_go").onclick = runLeads;
+
+function propLine(l){
+  const bits = [];
+  if(l.beds!=null) bits.push(`${l.beds} bd`);
+  if(l.baths!=null) bits.push(`${l.baths} ba`);
+  if(l.sqft) bits.push(`${Math.round(l.sqft).toLocaleString()} sqft`);
+  if(l.year_built) bits.push(`built ${Math.round(l.year_built)}`);
+  if(l.city) bits.push(esc(l.city));
+  return bits.join(" &middot; ");
+}
+
+// ---------- what's new ----------
+let NEW_DAYS = 7;
+document.querySelectorAll("#leads-panel .chip[data-days]").forEach(c => c.onclick = () => {
+  document.querySelectorAll("#leads-panel .chip[data-days]").forEach(x => x.classList.remove("on"));
+  c.classList.add("on"); NEW_DAYS = +c.dataset.days;
+});
+
+function diffRow(r, notes){
+  const facts = [];
+  if(r.price) facts.push(`asking ${fmt(r.price)}`);
+  if(r.est_arv) facts.push(`est ARV ${fmt(r.est_arv)}`);
+  if(r.est_mao) facts.push(`max offer ${fmt(r.est_mao)}`);
+  if(r.kind==="deal" && r.spread!=null) facts.push(`spread ${fmt(r.spread)}`);
+  if(r.verdict) facts.push(esc(r.verdict));
+  if(r.years_behind) facts.push(`${r.years_behind} yr behind, ${fmt(r.tax_owed)} owed`);
+  if(r.liens_owed) facts.push(`liens ${fmt(r.liens_owed)}`);
+  if(r.implied_value) facts.push(`~${fmt(r.implied_value)} implied`);
+  if(r.owner) facts.push(`owner ${esc(r.owner)}`);
+  const kind = {listed:"Listed",expired:"Expired",tax:"Tax roll",deal:"Deal scan"}[r.kind]||r.kind||"";
+  return `<div class="deal" style="padding:10px 13px">
+    <div class="deal-top"><span class="deal-addr">${r.score!=null?scoreBadge(r.score)+" ":""}${esc(r.address||"(no address)")}
+      <span class="pill">${esc(kind)}${r.city?" · "+esc(r.city):""}</span></span>
+      <span class="sub">${r.first_seen?"first seen "+esc(r.first_seen):""}${r.dropped_on?" · gone "+esc(r.dropped_on):""}</span></div>
+    <div class="sub">${facts.join(" &middot; ")}</div>
+    ${notes&&notes.length?`<div class="sub" style="color:var(--warn)">${esc(notes.join("; "))}</div>`:""}
+    <div style="margin-top:5px">${tagChips(r.tags)}</div>
+    <div class="sub" style="margin-top:5px">${leadLinks(r)}</div></div>`;
+}
+
+function diffBlock(diff, label, sinceDays){
+  if(!diff) return "";
+  if(sinceDays && !(diff.tracked||0) && !(diff.new||[]).length && !(diff.dropped||[]).length)
+    return `<div class="card"><h2>${esc(label)} &mdash; what's new</h2><div class="muted">No history yet.
+      Run "Find leads" or "Scan region" once (or <code>python hunt.py --daily</code>) to start tracking;
+      differences appear from the second run on.</div></div>`;
+  if(diff.first_run)
+    return `<div class="card"><h2>${esc(label)} &mdash; what's new</h2><div class="muted">First run: baseline of
+      ${(diff.tracked||0).toLocaleString()} tracked. New, changed and dropped properties show from the next run on.</div></div>`;
+  const since = sinceDays ? `last ${sinceDays} day${sinceDays>1?"s":""}` : `since last run${diff.last_run?" on "+esc(diff.last_run):""}`;
+  const both = (diff.new||[]).filter(r => (r.kind==="listed"||r.kind==="expired") && (r.years_behind||r.liens_owed));
+  const rest = (diff.new||[]).filter(r => !both.includes(r));
+  let h = `<div class="card"><h2>${esc(label)} &mdash; what's new (${since})</h2>
+    <div class="deal-num" style="margin-bottom:12px">
+      <div><span>New</span><b class="pos">${(diff.new||[]).length}</b></div>
+      <div><span>Changed</span><b>${(diff.changed||[]).length}</b></div>
+      <div><span>Dropped</span><b class="dimtxt">${(diff.dropped||[]).length}</b></div>
+      <div><span>Tracked</span><b>${(diff.tracked||0).toLocaleString()}</b></div></div>`;
+  if(both.length) h += `<div class="muted" style="margin:8px 0 6px"><b>New and both listed and delinquent</b></div>` + both.map(r=>diffRow(r)).join("");
+  if(rest.length) h += `<div class="muted" style="margin:8px 0 6px"><b>New</b></div>` + rest.slice(0,50).map(r=>diffRow(r)).join("")
+    + (rest.length>50?`<div class="muted">and ${rest.length-50} more</div>`:"");
+  if((diff.changed||[]).length) h += `<div class="muted" style="margin:12px 0 6px"><b>Changed</b></div>` + diff.changed.slice(0,40).map(r=>diffRow(r,r.notes)).join("");
+  if((diff.returned||[]).length) h += `<div class="muted" style="margin:12px 0 6px"><b>Back on the list</b></div>` + diff.returned.map(r=>diffRow(r,r.notes)).join("");
+  if((diff.dropped||[]).length) h += `<details style="margin-top:12px"><summary class="muted" style="cursor:pointer">Dropped off (${diff.dropped.length}) &mdash; sold, paid up or delisted</summary>`
+    + diff.dropped.slice(0,40).map(r=>diffRow(r)).join("") + `</details>`;
+  if(!(diff.new||[]).length && !(diff.changed||[]).length && !(diff.dropped||[]).length)
+    h += `<div class="muted">Nothing changed.</div>`;
+  return h + `</div>`;
+}
+
+async function whatsNew(){
+  const btn = $("l_new");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Loading';
+  try{
+    const res = await fetch(`/api/whatsnew?days=${NEW_DAYS}`);
+    const d = await res.json();
+    let h = diffBlock(d.leads, "Leads", d.days) + diffBlock(d.deals, "Deal scan", d.days);
+    if(!h) h = `<div class="card"><span class="muted">No history yet. Run "Find leads" or "Scan region" once to start tracking.</span></div>`;
+    $("out").innerHTML = h;
+    window.scrollTo({top:0, behavior:"smooth"});
+  }catch(e){ $("out").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  finally{ btn.disabled = false; btn.textContent = "What's new"; }
+}
+$("l_new").onclick = whatsNew;
+
+function renderLeads(d){
+  const st = d.stats || {};
+  let h = diffBlock(d.diff, "Leads");
+
+  h += `<div class="card"><h2>Lead sources &mdash; ${esc(d.home_county)}</h2>
+    <div class="muted">${esc((d.counties||[]).join(" &middot; "))}</div>
+    <div class="deal-num" style="margin-top:12px">
+      <div><span>Listings read</span><b>${(st.active_scanned||0).toLocaleString()}</b></div>
+      <div><span>With signals</span><b>${st.listed_with_signals||0}</b></div>
+      <div><span>Expired</span><b>${st.expired||0}</b></div>
+      <div><span>Tax-delinquent parcels</span><b>${(st.tax_parcels||0).toLocaleString()}</b></div>
+      <div><span>3+ yrs behind</span><b>${st.tax_3yr||0}</b></div>
+      <div><span>City liens</span><b>${st.city_liens||0}</b></div>
+      <div><span>Listed &amp; delinquent</span><b class="neg">${st.listed_and_delinquent||0}</b></div>
+    </div></div>`;
+
+  // --- court records (assisted) ---
+  const o = d.oscn || {};
+  h += `<div class="card"><h2>Court filings &mdash; foreclosure, probate, divorce</h2>
+    <div class="muted" style="margin-bottom:10px">${esc(o.note||"")}</div>`;
+  for(const s of (o.searches||[]))
+    h += `<div style="margin:6px 0"><a href="${esc(s.url)}" target="_blank" rel="noopener"><b>${esc(s.label)}</b> &rarr;</a>
+          <div class="sub">${esc(s.why)}</div></div>`;
+  h += `<textarea id="oscn_html" rows="4" placeholder="Paste the saved page source here (Ctrl+S on the OSCN results page, then open the .html file in Notepad and copy everything; or right-click > View page source and copy)"
+        style="width:100%;margin-top:10px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:12px/1.4 var(--mono)"></textarea>
+    <div style="margin-top:8px"><button id="oscn_go" class="ghost">Classify cases &amp; match to parcels</button></div>
+    <div id="oscn_out"></div></div>`;
+
+  // --- the intersection: listed AND delinquent ---
+  const both = [...(d.listed||[]), ...(d.expired||[])].filter(l => l.tax_status==="delinquent");
+  if(both.length){
+    h += `<div class="card"><h2>Listed <u>and</u> behind on taxes</h2>
+      <div class="muted" style="margin-bottom:10px">On the market and the owner is not paying the county. This is the shortlist.</div>`;
+    for(const l of both) h += leadCard(l);
+    h += `</div>`;
+  }
+
+  // --- listed with signals ---
+  const listed = (d.listed||[]).filter(l => l.tax_status!=="delinquent").slice(0,60);
+  if(listed.length){
+    h += `<div class="card"><h2>Active listings giving themselves away</h2>
+      <div class="muted" style="margin-bottom:10px">Scored on description language, staleness,
+      pricing below the last sale or the automated estimate, and cuts seen between scans.</div>`;
+    for(const l of listed) h += leadCard(l);
+    h += `</div>`;
+  }
+
+  // --- expired ---
+  const exp = (d.expired||[]).filter(l => l.tax_status!=="delinquent").slice(0,40);
+  if(exp.length){
+    h += `<div class="card"><h2>Expired listings &mdash; tried to sell, could not</h2>
+      <div class="muted" style="margin-bottom:10px">No agent in the way now. Direct-mail and door-knock territory.</div>
+      <div class="tblwrap"><table><thead><tr><th>Address</th><th>Was asking</th><th>Sqft</th><th>Built</th><th>Expired</th><th>Score</th></tr></thead><tbody>`;
+    for(const l of exp)
+      h += `<tr><td>${esc(l.address)}<div class="sub">${propLine(l)} &middot; ${leadLinks(l)}</div></td>
+        <td>${fmt(l.price)}</td><td>${l.sqft?Math.round(l.sqft).toLocaleString():"--"}</td>
+        <td class="dimtxt">${l.year_built?Math.round(l.year_built):"--"}</td>
+        <td class="dimtxt">${l.expired_days_ago!=null?l.expired_days_ago+"d ago":"--"}</td><td>${scoreBadge(l.score)}</td></tr>`;
+    h += `</tbody></table></div></div>`;
+  }
+
+  // --- tax delinquent ---
+  const tax = (d.tax||[]).filter(t => t.address && !t.land_only).slice(0,150);
+  const land = (d.tax||[]).filter(t => t.land_only).length;
+  const unresolved = (d.tax||[]).filter(t => !t.address && !t.land_only).length;
+  if(tax.length){
+    h += `<div class="card"><h2>Behind on property tax &mdash; not listed anywhere</h2>
+      <div class="muted" style="margin-bottom:10px">Off-market. Three years unpaid means the county
+      can sell it at the June resale; two years means the owner is one bill from that. City liens mean
+      code enforcement has already visited. Implied value is the assessed value grossed up at the county
+      ratio &mdash; a rough size check, not an ARV.
+      ${land?` ${land} land-only parcels hidden.`:""}${unresolved?` ${unresolved} more not yet resolved to an address (raise the max).`:""}</div>
+      <div class="tblwrap"><table><thead><tr><th>Address</th><th>Owner</th><th>Years</th><th>Tax owed</th><th>Liens</th><th>Implied value</th><th>Score</th></tr></thead><tbody>`;
+    for(const t of tax)
+      h += `<tr><td>${esc(t.address)}<div class="sub">${tagChips(t.tags)} ${leadLinks(t)}</div></td>
+        <td class="dimtxt" style="white-space:normal;max-width:180px">${esc(t.owner||"")}${t.mailing_address&&t.tags.includes("absentee")?`<div class="sub">mail: ${esc(t.mailing_address)}</div>`:""}</td>
+        <td>${t.years_behind}${t.unpaid_years&&t.unpaid_years.length?`<div class="sub">${t.unpaid_years.join(", ")}</div>`:""}</td>
+        <td>${fmt(t.tax_owed)}</td><td>${t.liens_owed?fmt(t.liens_owed):"--"}</td>
+        <td>${t.implied_value?fmt(t.implied_value):"--"}</td><td>${scoreBadge(t.score)}</td></tr>`;
+    h += `</tbody></table></div></div>`;
+  }
+
+  // --- sheriff ---
+  const sh = d.sheriff || {};
+  h += `<div class="card"><h2>Sheriff's sales</h2><div class="muted">${esc(sh.note||"")}
+        ${sh.url?` <a href="${esc(sh.url)}" target="_blank" rel="noopener">Open the county page &rarr;</a>`:""}</div>`;
+  if((sh.items||[]).length){
+    h += `<div class="tblwrap" style="margin-top:10px"><table><tbody>`;
+    for(const it of sh.items) h += `<tr>${it.cells.map(c=>`<td style="white-space:normal">${esc(c)}</td>`).join("")}</tr>`;
+    h += `</tbody></table></div>`;
+  }
+  h += `</div>`;
+
+  $("out").innerHTML = h;
+  $("oscn_go").onclick = parseOscn;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+function leadCard(l){
+  const top = (l.signals||[]).slice().sort((a,b)=>b.weight-a.weight).slice(0,3);
+  return `<div class="deal">
+    <div class="deal-top">
+      <span class="deal-addr">${esc(l.address)}</span>
+      <span>${scoreBadge(l.score)} <span class="badge ${l.kind==="expired"?"b-warn":"b-good"}" style="margin-left:6px">${l.kind==="expired"?"EXPIRED":esc(l.status||"LISTED")}</span></span>
+    </div>
+    <div class="sub">${propLine(l)}${l.days_on_mls?` &middot; ${Math.round(l.days_on_mls)} days on market`:""}
+      &middot; ${l.kind==="expired"?"was asking":"asking"} <b>${fmt(l.price)}</b>${l.owner?` &middot; owner ${esc(l.owner)}`:""}</div>
+    <div style="margin-top:7px">${tagChips(l.tags)}</div>
+    ${top.map(s=>`<div class="sub" style="margin-top:5px"><b>${esc(s.label)}</b>${s.evidence?` &mdash; ${esc(s.evidence)}`:""}</div>`).join("")}
+    ${l.tax_owed!=null?`<div class="sub" style="margin-top:5px">Tax owed ${fmt(l.tax_owed)}${l.liens_owed?`, liens ${fmt(l.liens_owed)}`:""}${l.unpaid_years&&l.unpaid_years.length?` (${l.unpaid_years.join(", ")})`:""}</div>`:""}
+    <div style="margin-top:8px;font-size:12.5px">${leadLinks(l)}</div>
+  </div>`;
+}
+
+async function parseOscn(){
+  const html = $("oscn_html").value;
+  const btn = $("oscn_go");
+  if(html.trim().length < 50){ $("oscn_out").innerHTML = `<div class="err" style="margin-top:10px">Paste the page source first.</div>`; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Matching';
+  try{
+    const res = await fetch("/api/leads/oscn", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({county: $("l_county").value, html})});
+    const d = await res.json();
+    if(!res.ok){ $("oscn_out").innerHTML = `<div class="err" style="margin-top:10px">${esc(d.error||"Failed")}</div>`; return; }
+    if(!d.cases.length){ $("oscn_out").innerHTML = `<div class="muted" style="margin-top:10px">${esc(d.note||"No cases found.")}</div>`; return; }
+    const CAT = {foreclosure:"b-bad", probate:"b-warn", divorce:"b-warn", "tax suit":"b-bad"};
+    let h = `<div class="muted" style="margin:12px 0 8px">${d.cases.length} cases: ${Object.entries(d.counts).map(([k,v])=>`${v} ${esc(k)}`).join(", ")}. ${d.with_parcels} matched to a parcel on the tax roll.</div>
+      <div class="tblwrap"><table><thead><tr><th>Case</th><th>Filed</th><th>Type</th><th>Parties</th><th>Parcel match</th></tr></thead><tbody>`;
+    for(const c of d.cases){
+      if(c.category==="other" && !(c.parcels||[]).length) continue;
+      h += `<tr><td>${c.case_url?`<a href="${esc(c.case_url)}" target="_blank" rel="noopener">${esc(c.number)}</a>`:esc(c.number)}</td>
+        <td class="dimtxt">${esc(c.filed||"")}</td>
+        <td><span class="badge ${CAT[c.category]||"b-good"}">${esc(c.category)}</span></td>
+        <td style="white-space:normal;max-width:320px;text-align:left"><b>${esc(c.plaintiff)}</b>${c.people.length?`<div class="sub">v. ${esc(c.people.join("; "))}</div>`:""}${c.why?`<div class="sub">${esc(c.why)}</div>`:""}</td>
+        <td style="white-space:normal;max-width:300px;text-align:left">${(c.parcels||[]).map(p=>`<div style="margin-bottom:6px">${p.location?`<b>${esc(p.location)}</b>`:`<span class="dimtxt">${esc(p.legal||p.property_id)}</span>`}
+          <div class="sub">${esc(p.owner)}${p.implied_market_value?` &middot; ~${fmt(p.implied_market_value)}`:""}${p.unpaid_years&&p.unpaid_years.length?` &middot; unpaid ${p.unpaid_years.join(", ")}`:""}
+          &middot; <a href="${esc(p.detail_url)}" target="_blank" rel="noopener">tax roll</a>${p.location?` &middot; ${mapLink(p.location+", OK")} &middot; <a href="#" class="analyze-link" data-addr="${esc(p.location)}, OK" data-price="">comp it</a>`:""}</div></div>`).join("") || `<span class="dimtxt">none</span>`}</td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+    $("oscn_out").innerHTML = h;
+  }catch(e){
+    $("oscn_out").innerHTML = `<div class="err" style="margin-top:10px">${esc(e.message)}</div>`;
+  }finally{ btn.disabled = false; btn.textContent = "Classify cases & match to parcels"; }
+}
+
+// ---------- property record ----------
+async function runRecord(){
+  const address = $("r_address").value.trim();
+  if(!address){ $("r_address").focus(); return; }
+  const btn = $("r_go");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Pulling records';
+  $("out").innerHTML = '<div class="card"><span class="muted">Reading the treasurer\'s roll, the parcel record and Realtor.com history. About 15 seconds.</span></div>';
+  try{
+    const res = await fetch("/api/dossier", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({address, county: $("r_county").value})});
+    const d = await res.json();
+    if(!res.ok) $("out").innerHTML = `<div class="err">${esc(d.error||"Lookup failed.")}</div>`;
+    else renderRecord(d);
+  }catch(e){ $("out").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  finally{ btn.disabled = false; btn.textContent = "Look up"; }
+}
+$("r_go").onclick = runRecord;
+$("r_address").addEventListener("keydown", e => { if(e.key==="Enter") runRecord(); });
+
+function renderRecord(d){
+  const t = d.tax||{}, p = d.parcel||{}, L = d.listing, S = d.situation||{};
+  let h = "";
+  h += `<div class="card"><div class="addr">${esc(d.normalised||d.address)}
+        <span class="pill">${esc(d.county||"")}</span></div>
+        <div class="sub">${p.legal?esc(p.legal):""}${d.latitude?` &middot; ${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`:""}</div></div>`;
+
+  // hero
+  h += `<div class="hero">
+    <div><div class="k">Owner of record</div><div class="v" style="font-size:18px">${esc(d.owner||"not on the roll")}</div>
+      <div class="s">${d.owner_occupied===false?"absentee &middot; ":""}${(d.people||[]).length>1?(d.people.length+" names on title"):""}</div></div>
+    <div><div class="k">Mail goes to</div><div class="v" style="font-size:15px;line-height:1.3">${esc(d.mailing_address||"?")}</div>
+      <div class="s">from the treasurer's roll &mdash; the reliable way to reach them</div></div>
+    <div><div class="k">Taxes</div><div class="v ${t.years_behind?"neg":"pos"}" style="font-size:20px">${t.found?(t.years_behind?`${t.years_behind} yr behind`:"current"):"&mdash;"}</div>
+      <div class="s">${t.found?`${fmt(t.tax_owed)} owed${t.special_assessments_owed?` &middot; liens ${fmt(t.special_assessments_owed)}`:""}${t.annual_tax?` &middot; bill ${fmt(t.annual_tax)}/yr`:""}`:"no record at that address"}</div></div>
+    <div><div class="k">Implied value</div><div class="v">${p.implied_market_value?fmt(p.implied_market_value):"&mdash;"}</div>
+      <div class="s">${p.net_assessed?`assessed ${fmt(p.net_assessed)} at ${(p.assessment_ratio*100).toFixed(1)}%`:""}${p.land_only?" &middot; <b>land only</b>":""}</div></div>
+  </div>`;
+
+  // situation
+  if((S.notes||[]).length || (S.approach||[]).length){
+    h += `<div class="split"><div class="card"><h2>What it means</h2>`;
+    for(const n of S.notes||[]) h += `<div class="flag f-info"><span class="dot"></span><div class="x" style="color:var(--text)">${esc(n)}</div></div>`;
+    h += `</div><div class="card"><h2>How to approach</h2>`;
+    for(const n of S.approach||[]) h += `<div class="flag f-medium"><span class="dot"></span><div class="x" style="color:var(--text)">${esc(n)}</div></div>`;
+    h += `</div></div>`;
+  }
+
+  // people + links
+  h += `<div class="split"><div class="card"><h2>People on title</h2>`;
+  if(!(d.people||[]).length) h += `<div class="muted">None resolved.</div>`;
+  for(const pp of d.people||[]) h += `<div style="margin-bottom:6px"><b>${esc(pp.name)}</b>${pp.entity?' <span class="pill">entity</span>':""}</div>`;
+  if((d.ownership_timeline||[]).length){
+    h += `<h2 style="margin-top:16px">Title on the roll</h2><div class="tblwrap"><table><tbody>`;
+    for(const r of d.ownership_timeline) h += `<tr><td class="dimtxt">${r.from}${r.to!==r.from?"&ndash;"+r.to:""}</td><td style="text-align:left">${esc(r.owner)}</td></tr>`;
+    h += `</tbody></table></div>`;
+  }
+  h += `</div><div class="card"><h2>Look deeper</h2>`;
+  for(const l of d.links||[]) h += `<div style="margin-bottom:9px"><a href="${esc(l.url)}" target="_blank" rel="noopener"><b>${esc(l.label)}</b> &rarr;</a>${l.alt?` <a class="sub" href="${esc(l.alt)}" target="_blank" rel="noopener">(alt)</a>`:""}<div class="sub">${esc(l.why)}</div></div>`;
+  if(d.tax_roll_url) h += `<div><a href="${esc(d.tax_roll_url)}" target="_blank" rel="noopener"><b>Treasurer's record</b> &rarr;</a></div>`;
+  h += `</div></div>`;
+
+  // listing
+  h += `<div class="card"><h2>Listing history</h2>`;
+  if(!L) h += `<div class="muted">No MLS history on Realtor.com. It has never been offered publicly in the data's memory.</div>`;
+  else{
+    h += `<div class="sub">${esc(L.status||"")} ${L.list_price?fmt(L.list_price):""} &middot; ${L.beds??"?"} bd / ${L.full_baths??"?"} ba &middot;
+      ${L.sqft?Math.round(L.sqft).toLocaleString()+" sqft":"sqft ?"} &middot; built ${L.year_built?Math.round(L.year_built):"?"}
+      ${L.last_sold_date?` &middot; last sold ${esc(String(L.last_sold_date).slice(0,10))} ${L.last_sold_price?fmt(L.last_sold_price):""}`:""}
+      ${L.estimated_value?` &middot; Realtor estimate ${fmt(L.estimated_value)}`:""}</div>`;
+    if(L.agent_name) h += `<div class="sub" style="margin-top:6px"><b>Listing agent:</b> ${esc(L.agent_name)} ${esc(L.agent_phones||"")} ${esc(L.agent_email||"")} ${L.office_name?"&middot; "+esc(L.office_name):""}</div>`;
+    if(L.property_url) h += `<div style="margin-top:6px"><a href="${esc(L.property_url)}" target="_blank" rel="noopener">Open listing &rarr;</a></div>`;
+    if(L.sqft) h += `<div style="margin-top:8px"><a href="#" class="analyze-link" data-addr="${esc(d.normalised||d.address)}" data-price="${L.list_price||""}">Comp it &rarr;</a></div>`;
+  }
+  h += `</div>`;
+
+  if((d.seen_by_app||[]).length){
+    h += `<div class="card"><h2>Already on your lists</h2>`;
+    for(const s of d.seen_by_app) h += `<div class="sub">${esc(s.kind)} lead since ${esc(s.first_seen)} &middot; score ${s.score} &middot; ${tagChips(s.tags)}</div>`;
+    h += `</div>`;
+  }
+  h += `<div class="muted">Sources: ${(d.sources||[]).map(s=>`${esc(s.name)} ${s.ok?"&#10003;":"&#10007;"}`).join(" &middot; ")}. Public records only; verify title at the county clerk before offering.</div>`;
+  $("out").innerHTML = h;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+$("go").onclick = run;
+$("address").addEventListener("keydown", e => { if(e.key==="Enter") run(); });
+$("asking").addEventListener("keydown", e => { if(e.key==="Enter") run(); });
+boot().then(bootCounties).then(loadSkips);
+</script>
+</body>
+</html>
