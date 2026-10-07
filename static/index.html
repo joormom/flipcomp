@@ -782,7 +782,7 @@ function renderSearch(d){
   const ver = d.verified || [];
   const seen = new Set(ver.map(v => v.address));
   const rest = (d.candidates||[]).filter(c => !seen.has(c.address));
-  let h = diffBlock(d.diff, "Deal scan");
+  let h = printBar("deals") + diffBlock(d.diff, "Deal scan");
 
   h += `<div class="card"><h2>Region scanned</h2>
     <div class="muted">${esc((d.counties||[]).join(" &middot; "))}</div>
@@ -1065,7 +1065,7 @@ function renderLeads(d){
   LAST_LEADS = d; SHOWING_ROLL = false;
   d = {...d, listed: (d.listed||[]).filter(inFocus), expired: (d.expired||[]).filter(inFocus), tax: (d.tax||[]).filter(inFocus)};
   const st = d.stats || {};
-  let h = diffBlock(d.diff, "Leads");
+  let h = printBar("leads") + diffBlock(d.diff, "Leads");
 
   h += `<div class="card"><h2>Lead sources &mdash; ${esc(d.home_county)}</h2>
     <div class="muted">${esc((d.counties||[]).join(" &middot; "))}</div>
@@ -1392,6 +1392,275 @@ $("b_save").onclick = async () => {
     buyer_name: $("b_name").value, buyer_phone: $("b_phone").value, buyer_email: $("b_email").value, buyer_company: $("b_company").value})});
   $("b_save").textContent = "Saved \u2713"; setTimeout(() => $("b_save").textContent = "Save", 1500);
 };
+
+
+// ---------- printable reports ----------
+// A clean, light, paper-friendly copy of what is on screen (focus filter
+// included), opened in its own window with the print dialog.
+let PRINT_N = 25;
+function printBar(kind){
+  const opts = [10, 25, 50, 0].map(n => `<option value="${n}" ${n===PRINT_N?"selected":""}>${n ? "Top " + n : "All"}</option>`).join("");
+  return `<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 18px">
+    <div style="flex:1;min-width:220px"><b>Print a copy</b>
+      <div class="muted">A clean report to hand out or save as a PDF${FOCUS_ONLY ? " (Owasso / Collinsville only, as shown)" : ""}.</div></div>
+    <label style="margin:0;display:flex;align-items:center;gap:8px">Per section
+      <select class="print-n" style="width:auto;padding:8px 10px">${opts}</select></label>
+    <button class="print-go" data-kind="${kind}" type="button">&#128424;&#xFE0E; Print</button>
+  </div>`;
+}
+document.addEventListener("change", e => {
+  if(e.target.classList.contains("print-n")) PRINT_N = +e.target.value;
+});
+document.addEventListener("click", async e => {
+  const b = e.target.closest(".print-go");
+  if(!b) return;
+  // Open the window inside the click so pop-up blockers allow it.
+  const w = window.open("", "_blank");
+  if(!w){ alert("Your browser blocked the print window. Allow pop-ups for this site and try again."); return; }
+  w.document.write("<p style='font:14px system-ui;padding:24px'>Preparing the report...</p>");
+  let by = {};
+  try{ by = (await (await fetch("/api/pipeline")).json()).buyer || {}; }catch(err){}
+  const html = b.dataset.kind === "deals" ? buildDealsPrint(LAST_SEARCH, PRINT_N, by) : buildLeadsPrint(LAST_LEADS, PRINT_N, by);
+  w.document.open(); w.document.write(html); w.document.close();
+});
+
+const P_TAG = Object.assign({}, TAG_LABEL, {focus_school: null});
+function pMoney(n){ return n===null||n===undefined||isNaN(n) ? "&ndash;" : "$" + Math.round(n).toLocaleString(); }
+function pCut(rows, n){ return n ? rows.slice(0, n) : rows; }
+function pPill(text, cls){ return `<span class="pill ${cls||""}">${esc(text)}</span>`; }
+function pTags(tags){
+  return (tags||[]).filter(t => P_TAG[t] !== null)
+    .map(t => pPill(P_TAG[t] || t, HOT.has(t) ? "hot" : "")).join("");
+}
+function pScore(s){
+  if(s===null || s===undefined) return "";
+  return `<span class="score ${s>=70?"hi":s>=40?"mid":"lo"}">${Math.round(s)}</span>`;
+}
+function pVerdict(v){
+  if(!v) return "";
+  const cls = v.startsWith("PURSUE") && !v.includes("CAUTION") ? "good" : (v==="PASS"||v==="NOT VIABLE") ? "bad" : "warn";
+  return pPill(v, "verdict " + cls);
+}
+function pFacts(x){
+  const bits = [];
+  if(x.city) bits.push(esc(x.city));
+  if(x.beds!=null) bits.push(`${+x.beds} bd`);
+  if(x.baths!=null) bits.push(`${+x.baths} ba`);
+  if(x.sqft) bits.push(`${Math.round(x.sqft).toLocaleString()} sqft`);
+  if(x.year_built) bits.push(`built ${Math.round(x.year_built)}`);
+  if(x.days_on_mls) bits.push(`${Math.round(x.days_on_mls)} days on market`);
+  return bits.join(" &middot; ");
+}
+function pNums(cells){
+  cells = cells.filter(c => c && c[1] !== undefined && c[1] !== null && c[1] !== "");
+  return `<div class="nums" style="grid-template-columns:repeat(${cells.length},minmax(0,1fr));max-width:${cells.length * 130}px">${cells.map(([k,v,cls]) => `<div><span>${k}</span><b class="${cls||""}">${v}</b></div>`).join("")}</div>`;
+}
+// Realtor.com serves a double-resolution photo by default; the single one is
+// a quarter of the size and still sharp at print size, which keeps a saved PDF small.
+function pPhoto(u){ return String(u||"").replace(/-w\d+_h\d+(_x2)?\.(webp|jpg)(\?.*)?$/, "-w480_h360.webp"); }
+function pCard(x, numsHtml, extra){
+  const photo = x.photo ? `<img class="ph" src="${esc(pPhoto(x.photo))}" alt="">` : `<div class="ph none">No photo</div>`;
+  const school = x.school ? pPill(x.school, "school") : "";
+  return `<div class="card">${photo}<div class="info">
+      <div class="top">${pScore(x.score)}${school}${pVerdict(x.verdict)}</div>
+      <div class="addr">${esc(x.address||"(no address)")}</div>
+      <div class="facts">${pFacts(x)}</div>
+      ${numsHtml}
+      ${extra||""}
+      ${x.url||x.listing_url ? `<div class="link">${esc(x.url||x.listing_url)}</div>` : ""}
+    </div></div>`;
+}
+function pSection(title, sub, total, shown, body){
+  if(!shown) return "";
+  return `<section><h2>${esc(title)} <span class="count">${shown < total ? `top ${shown} of ${total}` : total}</span></h2>
+    ${sub ? `<p class="sub">${sub}</p>` : ""}${body}</section>`;
+}
+function pTiles(tiles){
+  return `<div class="tiles">${tiles.map(([k,v,cls]) => `<div><b class="${cls||""}">${v}</b><span>${k}</span></div>`).join("")}</div>`;
+}
+function pDoc(title, subtitle, by, body){
+  const today = new Date().toLocaleDateString(undefined, {weekday:"long", year:"numeric", month:"long", day:"numeric"});
+  const who = [by.buyer_name, by.buyer_company].filter(Boolean).join(", ");
+  const contact = [by.buyer_phone, by.buyer_email].filter(Boolean).join(" &middot; ");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} - ${esc(today)}</title>
+<style>
+  @page{size:letter;margin:0.5in}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{margin:0;background:#eef2f7;color:#0f172a;font:12.5px/1.45 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .page{max-width:8.5in;margin:0 auto;background:#fff;padding:0.55in 0.6in 0.5in}
+  .bar{position:sticky;top:0;background:#0b1f3a;color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;z-index:2}
+  .bar button{font:600 13px system-ui;border:0;border-radius:7px;padding:8px 16px;cursor:pointer;background:#2563eb;color:#fff}
+  .bar button.alt{background:transparent;border:1px solid #475569}
+  .bar span{font:13px system-ui;color:#cbd5e1;flex:1}
+  header{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;border-bottom:3px solid #0b1f3a;padding-bottom:12px;margin-bottom:16px}
+  .brand{font:800 11px/1 inherit;letter-spacing:3px;color:#2563eb}
+  h1{font-size:26px;line-height:1.1;margin:6px 0 4px;letter-spacing:-.4px}
+  .region{color:#475569;font-size:12px}
+  .meta{text-align:right;font-size:12px;color:#475569;white-space:nowrap}
+  .meta b{color:#0f172a;font-size:13px}
+  .tiles{display:flex;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:6px}
+  .tiles div{flex:1;padding:10px 8px;text-align:center;border-left:1px solid #e2e8f0}
+  .tiles div:first-child{border-left:0}
+  .tiles b{display:block;font-size:20px;line-height:1.1}
+  .tiles span{font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:#64748b}
+  section{margin-top:20px}
+  h2{font-size:15px;margin:0 0 2px;padding-left:9px;border-left:4px solid #2563eb;break-after:avoid}
+  h2 .count{font-weight:500;color:#94a3b8;font-size:12px;margin-left:4px}
+  p.sub{margin:0 0 10px 13px;color:#64748b;font-size:11.5px}
+  .card{display:flex;gap:14px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;break-inside:avoid;page-break-inside:avoid}
+  .ph{width:132px;height:100px;object-fit:cover;border-radius:7px;flex:none;background:#e2e8f0}
+  .ph.none{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px}
+  .info{flex:1;min-width:0}
+  .top{margin-bottom:2px}
+  .addr{font-size:15.5px;font-weight:750;line-height:1.25}
+  .facts{color:#64748b;font-size:11.5px;margin-top:1px}
+  .nums{display:grid;margin-top:8px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;overflow:hidden}
+  .nums div{padding:5px 8px;border-left:1px solid #e2e8f0;min-width:0}
+  .nums div:first-child{border-left:0}
+  .nums span{display:block;font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:#94a3b8}
+  .nums b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .pos{color:#047857}.neg{color:#b91c1c}
+  .pill{display:inline-block;font-size:10px;font-weight:600;padding:1px 8px;border-radius:999px;margin:3px 4px 0 0;background:#f1f5f9;color:#334155}
+  .pill.hot{background:#ffedd5;color:#9a3412}
+  .pill.school{background:#d1fae5;color:#047857}
+  .pill.verdict{font-weight:800}
+  .pill.good{background:#d1fae5;color:#047857}.pill.warn{background:#fef3c7;color:#92400e}.pill.bad{background:#fee2e2;color:#b91c1c}
+  .score{display:inline-block;font-size:11px;font-weight:800;padding:1px 8px;border-radius:999px;margin:3px 4px 0 0}
+  .score.hi{background:#d1fae5;color:#047857}.score.mid{background:#fef3c7;color:#92400e}.score.lo{background:#f1f5f9;color:#64748b}
+  .why{margin-top:6px;font-size:11.5px;color:#334155}
+  .why div{margin-top:2px}
+  .note{margin-top:6px;font-size:11px;color:#92400e}
+  .link{margin-top:6px;font-size:9.5px;color:#64748b;word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{text-align:left;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #0b1f3a;padding:5px 6px}
+  td{padding:6px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  tr{break-inside:avoid;page-break-inside:avoid}
+  tbody tr:nth-child(even) td{background:#f8fafc}
+  td.n{text-align:right;white-space:nowrap}
+  td .s{color:#64748b;font-size:10.5px}
+  footer{margin-top:22px;padding-top:10px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px;display:flex;justify-content:space-between;gap:16px}
+  @media print{body{background:#fff}.bar{display:none}.page{padding:0;max-width:none}}
+  @media screen and (max-width:700px){
+    .page{padding:18px 14px}header{flex-direction:column;align-items:flex-start}.meta{text-align:left}
+    .tiles{flex-wrap:wrap}.tiles div{flex:1 0 33%;border-top:1px solid #e2e8f0}
+    .card{flex-direction:column}.ph{width:100%;height:190px}
+    .nums{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+    table{display:block;overflow-x:auto}}
+</style></head><body>
+<div class="bar"><span>Print preview. Use "Save as PDF" in the print dialog to email it.</span>
+  <button onclick="window.print()">Print</button><button class="alt" onclick="window.close()">Close</button></div>
+<div class="page">
+<header><div><div class="brand">FLIPCOMP</div><h1>${esc(title)}</h1><div class="region">${subtitle}</div></div>
+  <div class="meta"><b>${esc(today)}</b>${who ? `<br>Prepared by ${esc(who)}` : ""}${contact ? `<br>${contact}` : ""}</div></header>
+${body}
+<footer><span>Values are automated estimates from recent nearby sales, not appraisals. Verify condition, title and taxes before making an offer.</span><span>FlipComp</span></footer>
+</div>
+<script>
+  // Print once the photos have loaded (or after 4 seconds at most).
+  (function(){
+    const imgs = Array.from(document.images);
+    let left = imgs.length, done = false;
+    const go = () => { if(!done){ done = true; setTimeout(() => window.print(), 250); } };
+    if(!left) return go();
+    imgs.forEach(i => { if(i.complete) { if(--left === 0) go(); } else { i.onload = i.onerror = () => { if(--left === 0) go(); }; } });
+    setTimeout(go, 4000);
+  })();
+<\/script></body></html>`;
+}
+
+function buildDealsPrint(d, n, by){
+  d = d || {};
+  const ver = (d.verified||[]).filter(inFocus);
+  const seen = new Set(ver.map(v => v.address));
+  const rest = (d.candidates||[]).filter(inFocus).filter(c => !seen.has(c.address));
+  const good = ver.filter(v => v.verified);
+  let body = pTiles([
+    ["Listings screened", (d.active_screened||0).toLocaleString()],
+    ["Sales compared", (d.sold_pool||0).toLocaleString()],
+    ["Cleared the screen", (ver.length + rest.length).toLocaleString()],
+    ["Fully comped", good.length, "pos"],
+    ["Region median", d.market_psf ? `$${d.market_psf}/sqft` : "&ndash;"],
+  ]);
+  const vs = pCut(good, n);
+  body += pSection("Comp-verified deals", "Each one valued against recent nearby sales, with renovation cost and a maximum offer that leaves the target profit.",
+    good.length, vs.length, vs.map(v => {
+      const flags = (v.flags||[]).filter(f => f.level==="high"||f.level==="medium").slice(0,2);
+      return pCard(v, pNums([
+        ["Asking", pMoney(v.price)], ["ARV", pMoney(v.arv)], ["Rehab", pMoney(v.rehab)],
+        ["Max offer", v.feasible ? pMoney(v.mao) : "&ndash;", v.feasible ? "pos" : "neg"],
+        ["Profit at max", pMoney(v.profit_at_mao)],
+        ["Confidence", `${v.confidence}/100`],
+      ]), flags.length ? `<div class="note">${flags.map(f => "&#9888;&#xFE0E; " + esc(f.title)).join("<br>")}</div>` : "");
+    }).join(""));
+  const rs = pCut(rest.slice().sort((a,b) => (b.spread||0) - (a.spread||0)), n);
+  body += pSection("Also worth a look", "Passed the quick screen but not yet fully comped. Estimates use a neighbourhood median.",
+    rest.length, rs.length, `<table><thead><tr><th>Property</th><th>Asking</th><th>Est. ARV</th><th>Est. rehab</th><th>Est. max offer</th><th>Spread</th></tr></thead><tbody>${
+      rs.map(c => `<tr><td><b>${esc(c.address)}</b>${c.school ? " " + pPill(c.school, "school") : ""}<div class="s">${pFacts(c)}</div></td>
+        <td class="n">${pMoney(c.price)}</td><td class="n">${pMoney(c.est_arv)}</td><td class="n">${pMoney(c.est_rehab)}</td>
+        <td class="n">${pMoney(c.est_mao)}</td><td class="n ${(c.spread||0)>=0?"pos":"neg"}">${pMoney(c.spread)}</td></tr>`).join("")
+    }</tbody></table>`);
+  if(!vs.length && !rs.length) body += `<p class="sub" style="margin-top:20px">No listings cleared the screen in this scan.</p>`;
+  return pDoc("Deal Report", (d.counties||[]).map(esc).join(" &middot; ") + (FOCUS_ONLY ? " &middot; Owasso &amp; Collinsville schools only" : ""), by, body);
+}
+
+function buildLeadsPrint(d, n, by){
+  d = d || {};
+  const listedAll = (d.listed||[]).filter(inFocus), expAll = (d.expired||[]).filter(inFocus), taxAll = (d.tax||[]).filter(inFocus);
+  const st = d.stats || {};
+  const why = l => {
+    const top = (l.signals||[]).slice().sort((a,b) => b.weight - a.weight).slice(0,3);
+    return top.length ? `<div class="why">${top.map(s => `<div><b>${esc(s.label)}</b>${s.evidence ? ` &mdash; ${esc(s.evidence)}` : ""}</div>`).join("")}</div>` : "";
+  };
+  const leadNums = l => pNums([
+    [l.kind==="expired" ? "Was asking" : "Asking", pMoney(l.price)],
+    l.tax_owed != null ? ["Tax owed", pMoney(l.tax_owed), "neg"] : null,
+    l.liens_owed ? ["City liens", pMoney(l.liens_owed), "neg"] : null,
+    l.est_arv ? ["Est. ARV", pMoney(l.est_arv)] : null,
+  ]) + (l.owner ? `<div class="facts" style="margin-top:5px">Owner: <b>${esc(l.owner)}</b></div>` : "");
+  let tiles = [
+    ["Listings read", (st.active_scanned||0).toLocaleString()],
+    ["With seller signals", st.listed_with_signals||0],
+    ["Expired", st.expired||0],
+    ["Behind on tax", (st.tax_parcels||0).toLocaleString()],
+    ["Listed &amp; behind", st.listed_and_delinquent||0, "neg"],
+  ];
+  if(st.in_focus) tiles.push(["Owasso / Collinsville", (st.in_focus.owasso||0) + (st.in_focus.collinsville||0), "pos"]);
+  let body = pTiles(tiles);
+
+  const both = [...listedAll, ...expAll].filter(l => l.tax_status==="delinquent");
+  const b = pCut(both, n);
+  body += pSection("Listed and behind on taxes", "On the market and the owner is not paying the county. The shortlist.",
+    both.length, b.length, b.map(l => pCard(l, leadNums(l), `<div>${pTags(l.tags)}</div>` + why(l))).join(""));
+
+  const listed = listedAll.filter(l => l.tax_status!=="delinquent");
+  const ls = pCut(listed, n);
+  body += pSection("Motivated sellers on the market", "Listing language, time on market, and pricing below the last sale or the automated estimate.",
+    listed.length, ls.length, ls.map(l => pCard(l, leadNums(l), `<div>${pTags(l.tags)}</div>` + why(l))).join(""));
+
+  const exp = expAll.filter(l => l.tax_status!=="delinquent");
+  const es = pCut(exp, n);
+  body += pSection("Expired listings", "Tried to sell and could not. No agent in the way now.",
+    exp.length, es.length, `<table><thead><tr><th>Property</th><th>Was asking</th><th>Sqft</th><th>Built</th><th>Expired</th><th>Score</th></tr></thead><tbody>${
+      es.map(l => `<tr><td><b>${esc(l.address)}</b>${l.school ? " " + pPill(l.school, "school") : ""}<div class="s">${esc(l.city||"")}${l.beds!=null ? ` &middot; ${+l.beds} bd` : ""}${l.baths!=null ? ` &middot; ${+l.baths} ba` : ""}</div></td>
+        <td class="n">${pMoney(l.price)}</td><td class="n">${l.sqft ? Math.round(l.sqft).toLocaleString() : "&ndash;"}</td>
+        <td class="n">${l.year_built ? Math.round(l.year_built) : "&ndash;"}</td>
+        <td class="n">${l.expired_days_ago!=null ? l.expired_days_ago + " days ago" : "&ndash;"}</td><td class="n">${pScore(l.score)}</td></tr>`).join("")
+    }</tbody></table>`);
+
+  const tax = taxAll.filter(t => t.address && !t.land_only);
+  const ts = pCut(tax, n);
+  body += pSection("Behind on property tax (off market)", "Three years unpaid means the county can sell it at the June tax resale. Implied value is a rough size check from the assessment, not an ARV.",
+    tax.length, ts.length, `<table><thead><tr><th>Property</th><th>Owner</th><th>Years</th><th>Tax owed</th><th>Liens</th><th>Implied value</th><th>Score</th></tr></thead><tbody>${
+      ts.map(t => `<tr><td><b>${esc(t.address)}</b>${t.school ? " " + pPill(t.school, "school") : ""}${t.city || t.location_city ? `<div class="s">${esc(t.city || t.location_city)}</div>` : ""}<div>${pTags(t.tags)}</div></td>
+        <td>${esc(t.owner||"")}${t.mailing_address && (t.tags||[]).includes("absentee") ? `<div class="s">mail: ${esc(t.mailing_address)}</div>` : ""}</td>
+        <td class="n">${t.years_behind||""}${t.unpaid_years && t.unpaid_years.length ? `<div class="s">${esc(t.unpaid_years.join(", "))}</div>` : ""}</td>
+        <td class="n neg">${pMoney(t.tax_owed)}</td><td class="n">${t.liens_owed ? pMoney(t.liens_owed) : "&ndash;"}</td>
+        <td class="n">${t.implied_value ? pMoney(t.implied_value) : "&ndash;"}</td><td class="n">${pScore(t.score)}</td></tr>`).join("")
+    }</tbody></table>`);
+
+  if(!b.length && !ls.length && !es.length && !ts.length) body += `<p class="sub" style="margin-top:20px">No leads in this run.</p>`;
+  return pDoc("Lead Report", (d.counties||[]).map(esc).join(" &middot; ") + (FOCUS_ONLY ? " &middot; Owasso &amp; Collinsville schools only" : ""), by, body);
+}
 
 // ---------- team ----------
 let TEAM = null;
