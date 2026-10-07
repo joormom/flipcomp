@@ -31,8 +31,11 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 FIRST_YEAR = 2019
 LAST_YEAR = 2025
 
-UNPAID_CACHE_TTL = 24 * 60 * 60    # county-wide list, refreshed daily
-DETAIL_CACHE_TTL = 30 * 24 * 3600  # a parcel's address does not change
+# Delinquency moves monthly at most, so there is no reason to ask a county's
+# website more than once a week. Being a light user is what keeps access.
+UNPAID_CACHE_TTL = 7 * 24 * 3600
+DETAIL_CACHE_TTL = 120 * 24 * 3600  # a parcel's address and owner rarely change
+BLOCK_PAUSE = 24 * 3600              # after a 403, leave the site alone for a day
 
 # Counties known to be served by oktaxrolls. Others may work too -- the slug is
 # simply the lower-case county name -- but these have been confirmed.
@@ -95,14 +98,68 @@ def _money(s: str) -> float | None:
         return None
 
 
+RETRY_WAITS = (5, 15, 30, 60)  # seconds; a county site is a shared public service
+
+
+def _block_file() -> str:
+    d = os.path.join(CACHE_DIR, "taxroll")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "BLOCKED")
+
+
+def blocked_until() -> float | None:
+    """Epoch seconds until which the site asked not to be contacted, if any."""
+    try:
+        t = os.path.getmtime(_block_file()) + BLOCK_PAUSE
+    except OSError:
+        return None
+    return t if t > time.time() else None
+
+
+def _request(county: str, method: str, url: str, **kw) -> requests.Response:
+    """GET/POST with polite backoff on rate limits and transient errors.
+
+    The treasurer's site returns 429 when hit hard. A daily run makes a few
+    hundred requests, so the right response is to wait and continue, never to
+    give up and hand back an empty county.
+    """
+    until = blocked_until()
+    if until:
+        raise requests.RequestException(
+            "the tax roll site refused access; pausing until "
+            + time.strftime("%Y-%m-%d %H:%M", time.localtime(until)))
+    last_exc = None
+    for wait in (0,) + RETRY_WAITS:
+        if wait:
+            time.sleep(wait)
+        try:
+            r = _sess(county).request(method, url, timeout=120, **kw)
+        except requests.RequestException as exc:
+            last_exc = exc
+            continue
+        if r.status_code == 403:
+            # A refusal, not congestion. Retrying would be ignoring a no.
+            with open(_block_file(), "w", encoding="utf-8") as fh:
+                fh.write(time.strftime("%Y-%m-%d %H:%M"))
+            raise requests.RequestException(f"403 from {url.split('?')[0]} - access refused")
+        if r.status_code in (429, 502, 503, 504):
+            ra = r.headers.get("Retry-After")
+            if ra and ra.isdigit() and int(ra) <= 120:
+                time.sleep(int(ra))
+            last_exc = requests.HTTPError(f"{r.status_code} from {url.split('?')[0]}")
+            continue
+        r.raise_for_status()
+        return r
+    raise requests.RequestException(f"gave up after {len(RETRY_WAITS)} retries: {last_exc}")
+
+
 def _query(county: str, mode: str, params: dict, start: int = 0,
-           length: int = 25) -> list[list[str]]:
+           length: int = 25, with_total: bool = False):
     q = {"from_years": str(FIRST_YEAR), "to_year": str(LAST_YEAR),
          "show_records": "25", "total_record": "", **params}
     try:
-        r = _sess(county).post(f"{BASE}/searchResult/{county}/{mode}", params=q,
-                               data=_dt_body(start, length), timeout=120)
-        r.raise_for_status()
+        r = _request(county, "POST", f"{BASE}/searchResult/{county}/{mode}", params=q,
+                     data=_dt_body(start, length))
         j = r.json()
     except requests.RequestException as exc:
         raise TaxRollError(f"Tax roll request failed: {exc}") from exc
@@ -111,7 +168,14 @@ def _query(county: str, mode: str, params: dict, start: int = 0,
             f"Tax roll returned non-JSON for {county}; the county may not be on "
             "this system.") from exc
     data = j.get("data") or []
-    return data if isinstance(data, list) else []
+    data = data if isinstance(data, list) else []
+    if with_total:
+        try:
+            total = int(j.get("recordsFiltered"))
+        except (TypeError, ValueError):
+            total = None
+        return data, total
+    return data
 
 
 def _row(cells: list[str], mode: str) -> dict[str, Any] | None:
@@ -176,20 +240,39 @@ def county_unpaid(county: str) -> list[dict[str, Any]]:
     params = {"first_name": "", "last_name": "", "business_owner_name": "",
               "show_unpaid_only": "1"}
     out: list[dict] = []
-    start, page = 0, 2000
+    # The vendor caps each response (100 rows as of Sept 2026; it used to
+    # return thousands). Page by what the server reports as the total, never
+    # by "a short page means the end" -- that is how a cap silently became a
+    # 100-record county.
+    start, total, raw = 0, None, 0
     while True:
-        rows = _query(county, "owner_name", params, start=start, length=page)
+        rows, reported = _query(county, "owner_name", params, start=start, length=500,
+                                with_total=True)
+        if total is None:
+            total = reported
+        if not rows:
+            break
+        raw += len(rows)
         for cells in rows:
             rec = _row(cells, "owner_name")
             if rec:
                 out.append(rec)
-        if len(rows) < page:
+        start += len(rows)
+        if total is not None and start >= total:
             break
-        start += page
-        if start > 50_000:  # safety valve
+        if start > 100_000:  # safety valve
             break
+        time.sleep(0.4)  # be polite to a county's website
+    if total and raw < total * 0.95:
+        raise TaxRollError(f"Tax roll for {county} returned {raw} of {total} records; "
+                           "not caching a partial list.")
     _cache_save(f"unpaid_{county}.json", out)
     return out
+
+
+def detail_is_cached(detail_url: str) -> bool:
+    key = "detail3_" + re.sub(r"[^a-zA-Z0-9]", "", detail_url or "")[-60:] + ".json"
+    return _cache_load(key, DETAIL_CACHE_TTL) is not None
 
 
 def parcel_detail(detail_url: str) -> dict[str, Any]:
@@ -200,8 +283,7 @@ def parcel_detail(detail_url: str) -> dict[str, Any]:
         return hit
 
     try:
-        r = _sess("washington").get(detail_url, timeout=60)
-        r.raise_for_status()
+        r = _request(_county_from_url(detail_url), "GET", detail_url)
     except requests.RequestException as exc:
         raise TaxRollError(f"Parcel detail failed: {exc}") from exc
 
@@ -326,10 +408,16 @@ def calibrate_assessment_ratio(county: str, listings, max_samples: int = 40) -> 
 def lookup_address(county: str, street_number: str, street_name: str) -> list[dict]:
     """All tax records for a street address, paid and unpaid, across years."""
     county = county.strip().lower()
+    key = f"addr_{county}_{re.sub(r'[^A-Za-z0-9]', '', str(street_number))}_"           f"{re.sub(r'[^A-Za-z0-9]', '', street_name.upper())}.json"
+    hit = _cache_load(key, UNPAID_CACHE_TTL)
+    if hit is not None:
+        return hit
     params = {"street_number": str(street_number).strip(),
               "street_name": street_name.strip().upper(), "show_unpaid_only": "0"}
     rows = _query(county, "street_address", params, length=200)
-    return [rec for rec in (_row(c, "street_address") for c in rows) if rec]
+    out = [rec for rec in (_row(c, "street_address") for c in rows) if rec]
+    _cache_save(key, out)
+    return out
 
 
 def lookup_owner(county: str, last_name: str, first_name: str = "",

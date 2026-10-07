@@ -39,8 +39,14 @@ def save(prefs: dict) -> dict:
         "exclude_counties": sorted({_norm(c).replace(" county", "")
                                     for c in prefs.get("exclude_counties", []) if _norm(c)}),
     }
+    try:
+        with open(PREFS_PATH, encoding="utf-8") as fh:
+            existing = json.load(fh)
+    except Exception:
+        existing = {}
+    existing.update(clean)  # keep buyer details and anything else stored alongside
     with open(PREFS_PATH, "w", encoding="utf-8") as fh:
-        json.dump(clean, fh, indent=2)
+        json.dump(existing, fh, indent=2)
     return clean
 
 
@@ -80,3 +86,30 @@ def address_excluded(address, prefs: dict | None = None) -> bool:
     if len(parts) >= 2 and parts[1] in set(prefs["exclude_cities"]):
         return True
     return any(text.endswith(" " + c) for c in prefs["exclude_cities"])
+
+
+# --- buyer details for owner letters ------------------------------------------
+BUYER_KEYS = ("buyer_name", "buyer_phone", "buyer_email", "buyer_company")
+
+
+def load_buyer() -> dict:
+    try:
+        with open(PREFS_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        data = {}
+    return {k: data.get(k, "") for k in BUYER_KEYS}
+
+
+def save_buyer(**fields) -> dict:
+    try:
+        with open(PREFS_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        data = {}
+    for k in BUYER_KEYS:
+        if fields.get(k) is not None:
+            data[k] = str(fields[k]).strip()
+    with open(PREFS_PATH, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    return load_buyer()

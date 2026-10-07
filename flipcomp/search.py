@@ -35,7 +35,7 @@ SCREEN_MIN_COMPS = 4
 
 DEFAULTS = {
     "min_price": 30_000,
-    "max_price": 400_000,
+    "max_price": 500_000,     # Owasso's median sale is ~$330k; leave room above it
     "min_sqft": 700,
     "max_sqft": 4_000,
     "min_spread": 0,        # MAO must beat asking by at least this much
@@ -75,6 +75,16 @@ def fetch_region(counties: list[dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
         except Exception:
             pass
 
+    from . import focus
+    try:
+        fa = focus.listings("for_sale")
+        if not fa.empty:
+            act_frames.append(fa.assign(search_county=fa["county"].astype(str)))
+        fs = focus.listings("sold", past_days=SOLD_LOOKBACK_DAYS)
+        if not fs.empty:
+            sold_frames.append(fs)
+    except Exception:
+        pass
     if not act_frames:
         raise RuntimeError("No active listings returned for this region.")
     if not sold_frames:
@@ -107,7 +117,11 @@ def _clean_sold(sold: pd.DataFrame) -> pd.DataFrame:
     if "style" in df.columns:
         df = df[df["style"].astype(str).str.upper().isin(RESIDENTIAL)]
 
+    from .compengine import drop_bulk_sales
+    df = drop_bulk_sales(df, "sale_price", "sold_date")
     df["psf"] = df["sale_price"] / df["sqft"]
+    from .condition import classify
+    df["renovated"] = (df["text"] if "text" in df.columns else pd.Series("", index=df.index))         .apply(classify).eq("renovated")
     lo, hi = df["psf"].quantile([0.05, 0.95])
     if pd.notna(lo) and pd.notna(hi) and hi > lo:
         df = df[df["psf"].between(lo, hi)]
@@ -137,8 +151,13 @@ def _clean_active(active: pd.DataFrame, f: dict) -> pd.DataFrame:
 
 def _estimate_arv(lat: float, lon: float, sqft: float,
                   s_lat: np.ndarray, s_lon: np.ndarray,
-                  s_sqft: np.ndarray, s_psf: np.ndarray) -> tuple[float, int, float]:
-    """Median $/sqft of nearby same-size sales -> (arv, comp_count, radius)."""
+                  s_sqft: np.ndarray, s_psf: np.ndarray,
+                  s_reno: np.ndarray | None = None) -> tuple[float, int, float]:
+    """Median $/sqft of nearby same-size sales -> (arv, comp_count, radius).
+
+    Renovated sales are what a flip resells against, so when three or more
+    are in range they set the price; otherwise all nearby sales do.
+    """
     # Equirectangular approximation: accurate to well under a percent at these
     # distances and far cheaper than haversine across a whole county.
     latr = np.radians(lat)
@@ -150,6 +169,8 @@ def _estimate_arv(lat: float, lon: float, sqft: float,
         m = (dist <= radius) & (np.abs(s_sqft - sqft) <= sqft * tol)
         n = int(m.sum())
         if n >= SCREEN_MIN_COMPS:
+            if s_reno is not None and int((m & s_reno).sum()) >= 3:
+                return float(np.median(s_psf[m & s_reno])) * sqft, n, radius
             return float(np.median(s_psf[m])) * sqft, n, radius
     return 0.0, 0, 0.0
 
@@ -174,6 +195,7 @@ def screen(counties: list[dict], filters: dict | None = None,
     s_lon = sold["lon"].to_numpy(float)
     s_sqft = sold["sqft"].to_numpy(float)
     s_psf = sold["psf"].to_numpy(float)
+    s_reno = sold["renovated"].to_numpy(bool) if "renovated" in sold.columns else None
 
     market_psf = float(sold["psf"].median())
     rows: list[dict] = []
@@ -182,7 +204,7 @@ def screen(counties: list[dict], filters: dict | None = None,
         sqft = float(r["sqft"])
         price = float(r["price"])
         arv, n, radius = _estimate_arv(float(r["lat"]), float(r["lon"]), sqft,
-                                       s_lat, s_lon, s_sqft, s_psf)
+                                       s_lat, s_lon, s_sqft, s_psf, s_reno)
         if n < SCREEN_MIN_COMPS or arv <= 0:
             continue
 
@@ -203,7 +225,9 @@ def screen(counties: list[dict], filters: dict | None = None,
         spread = mao - price
         rows.append({
             "address": r.get("formatted_address"),
+            "_lat": float(r["lat"]), "_lon": float(r["lon"]),
             "url": r.get("property_url"),
+            "photo": r.get("primary_photo") if isinstance(r.get("primary_photo"), str) else None,
             "city": r.get("city"),
             "county": r.get("county") or r.get("search_county"),
             "zip": r.get("zip_code"),
@@ -229,6 +253,12 @@ def screen(counties: list[dict], filters: dict | None = None,
             "roi_at_asking": deal["roi_pct"],
         })
 
+    from . import focus
+    for row in rows:
+        sd = focus.district_of(row.get("_lat"), row.get("_lon"))
+        row["school_district"], row["school"] = sd, focus.label(sd)
+        row.pop("_lat", None)
+        row.pop("_lon", None)
     rows.sort(key=lambda x: x["spread"], reverse=True)
     hits = [r for r in rows if r["spread"] >= f["min_spread"]]
 

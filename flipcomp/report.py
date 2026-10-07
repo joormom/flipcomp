@@ -20,7 +20,7 @@ TAG_LABEL = {
     "vacant": "vacant", "life_event": "life event", "tenant": "tenant", "stale": "stale",
     "below_last_sale": "below last sale", "price_cut": "price cut", "under_avm": "under estimate",
     "expired": "expired", "tax_3yr": "3yr tax", "tax_2yr": "2yr tax", "tax_1yr": "1yr tax",
-    "city_lien": "city lien", "absentee": "absentee",
+    "city_lien": "city lien", "absentee": "absentee", "focus_school": "focus district",
 }
 KIND_LABEL = {"listed": "Listed", "expired": "Expired", "tax": "Tax roll", "deal": "Deal scan"}
 
@@ -89,6 +89,39 @@ def _section(title: str, rows: list[dict], note_key: str | None = None, limit: i
     return f'<section><h2>{_e(title)} <span class="c">{len(rows)}</span></h2>{body}{more}</section>'
 
 
+def _followups_html() -> str:
+    """Pipeline deals due for a touch. First thing in the report, always."""
+    try:
+        from . import pipeline
+        dd = pipeline.due()
+    except Exception:
+        return ""
+    rows = dd["overdue"] + dd["today"]
+    if not rows:
+        return ""
+    stage = dict(pipeline.STAGES)
+    body = ""
+    for d in rows:
+        late = d["next_follow_up"] < dt.date.today().isoformat()
+        last = (d.get("log") or [["", ""]])[-1]
+        facts = [stage.get(d["stage"], d["stage"])]
+        if d.get("owner"):
+            facts.append(_e(d["owner"]))
+        if d.get("phone"):
+            facts.append(_e(d["phone"]))
+        if d.get("offer"):
+            facts.append(f"offered {_money(d['offer'])}")
+        if d.get("mao"):
+            facts.append(f"max {_money(d['mao'])}")
+        body += (f'<div class="r"><div class="h"><span class="s" style="'
+                 f'{"background:rgba(255,107,107,.16);color:#ff6b6b" if late else ""}">'
+                 f'{"LATE" if late else "TODAY"}</span><b>{_e(d.get("address"))}</b>'
+                 f' <span class="k">due {_e(d["next_follow_up"])}</span></div>'
+                 f'<div class="f">{" &middot; ".join(facts)}</div>'
+                 f'<div class="n">last: {_e(last[0])} {_e(last[1])}</div></div>')
+    return f'<section><h2>Follow-ups due <span class="c">{len(rows)}</span></h2>{body}</section>'
+
+
 def build_html(leads_diff: dict | None, deals_diff: dict | None, title: str | None = None,
                since_days: int | None = None) -> str:
     today = dt.date.today().strftime("%A %d %B %Y")
@@ -106,12 +139,17 @@ def build_html(leads_diff: dict | None, deals_diff: dict | None, title: str | No
         hdr = (f"since {since_days} days" if since_days else
                f"since last run{' on ' + diff['last_run'] if diff.get('last_run') else ''}")
         parts.append(f'<h1 class="src">{_e(label)} <span class="c">{_e(hdr)}</span></h1>')
+        for w in diff.get("warnings") or []:
+            parts.append(f'<div class="r" style="border-color:#ffb648"><div class="n">Data warning: {_e(w)}</div></div>')
         # The intersection first: anything new that is both on the market and delinquent.
+        focus_new = [r for r in diff.get("new", []) if r.get("school_district")]
+        if focus_new:
+            parts.append(_section("New in Owasso / Collinsville schools", focus_new))
         both = [r for r in diff.get("new", []) if r.get("kind") in ("listed", "expired")
-                and (r.get("years_behind") or r.get("liens_owed"))]
+                and (r.get("years_behind") or r.get("liens_owed")) and r not in focus_new]
         if both:
             parts.append(_section("New: listed AND behind on taxes", both))
-        new = [r for r in diff.get("new", []) if r not in both]
+        new = [r for r in diff.get("new", []) if r not in both and r not in focus_new]
         parts.append(_section("New since last time", new, empty="No new properties."))
         parts.append(_section("Changed", diff.get("changed", []), note_key="notes",
                               empty="No material changes."))
@@ -120,6 +158,7 @@ def build_html(leads_diff: dict | None, deals_diff: dict | None, title: str | No
         parts.append(_section("Dropped off", diff.get("dropped", []), limit=30,
                               empty="Nothing dropped off."))
 
+    parts.append(_followups_html())
     block(leads_diff, "Leads")
     block(deals_diff, "Deal scan")
 
@@ -144,6 +183,21 @@ def build_html(leads_diff: dict | None, deals_diff: dict | None, title: str | No
 
 def build_text(leads_diff: dict | None, deals_diff: dict | None) -> str:
     out = []
+    try:
+        from . import pipeline
+        dd = pipeline.due()
+        rows = dd["overdue"] + dd["today"]
+    except Exception:
+        rows = []
+    if rows:
+        out.append("=" * 96)
+        out.append(f"  FOLLOW-UPS DUE ({len(rows)})")
+        out.append("=" * 96)
+        for d in rows:
+            last = (d.get("log") or [["", ""]])[-1]
+            out.append(f"  {d['next_follow_up']}  {(d.get('address') or '')[:44]:<44} {d['stage']:<14} "
+                       f"{d.get('owner') or ''} {d.get('phone') or ''}")
+            out.append(f"        last: {last[0]} {last[1]}")
 
     def line(r, notes=None):
         bits = [f"{(r.get('score') if r.get('score') is not None else ''):>3}",

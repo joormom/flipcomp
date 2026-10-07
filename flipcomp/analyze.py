@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from . import flags as riskflags
-from . import offer, rehab, states
+from . import accuracy, offer, rehab, rental, states
 from .compengine import run_comps
 from .data import DataError, fetch_sold_pool, geocode, lookup_subject
 
@@ -46,6 +46,13 @@ def analyze(address: str,
     pool = fetch_sold_pool(subject)
     comp_result = run_comps(pool, subject)
     arv = float(comp_result["arv"])
+    _ck = (subject.get("county") or "").lower().replace(" county", "").strip()
+    from . import focus as _focus
+    _sd = _focus.district_of(subject.get("latitude"), subject.get("longitude"))
+    subject["school_district"], subject["school"] = _sd, _focus.label(_sd)
+    # A focus district's own backtest beats the county average when we have it.
+    comp_result["accuracy"] = (accuracy.cached(_sd) if _sd else None) or accuracy.cached(_ck)
+    comp_result["accuracy_text"] = accuracy.describe(comp_result["accuracy"])
 
     # --- 3. Renovation budget -------------------------------------------
     sqft = float(subject.get("sqft") or 0)
@@ -101,6 +108,15 @@ def analyze(address: str,
     else:
         tax_source = "manual"
 
+    # Hold period from the work and the local market, not a flat guess: how
+    # long the renovation takes, how long renovated homes here sit before they
+    # go under contract, and a month to close.
+    hold = _hold_period(reno.get("tier"), comp_result)
+    if "hold_months" not in params:
+        params["hold_months"] = hold["months"]
+    else:
+        hold["source"] = "manual"
+
     rehab_total = float(reno["total"])
     mao = offer.max_allowable_offer(arv, rehab_total, params)
     mao_deal = offer.evaluate(mao, arv, rehab_total, params)
@@ -128,13 +144,50 @@ def analyze(address: str,
         arv_low=comp_result["arv_low"],
     )
 
+    # At an auction the asking price is only where bidding opens, so "clears
+    # your target at asking" is meaningless. Turn the max offer into a max bid.
+    if riskflags.is_auction_listing(subject) and feasible:
+        bid = mao / 1.10
+        call = {"call": "AUCTION - BID UP TO " + f"${bid:,.0f}", "tone": "warn",
+                "detail": (f"This is an auction; the listed ${asking_price:,.0f} is the opening bid. "
+                           f"Your maximum offer of ${mao:,.0f} allows for a 10% buyer's premium "
+                           f"at a hammer price of about ${bid:,.0f} - stop bidding there. "
+                           "Check the actual premium, deposit and closing terms first.")
+                if asking_price else f"Auction. Stop bidding at about ${bid:,.0f}.",
+                "gap_to_asking": None, "gap_pct": None}
+
     # A little negotiating room under the max, floored so it stays sane.
     opening = max(0.0, min(mao * 0.92, asking_price * 0.97)) if asking_price \
         else mao * 0.92
 
+    # --- 5. Other exits ---------------------------------------------------
+    # Wholesale: put it under contract and assign it to a flipper. They will
+    # pay roughly the 70%-rule price; the fee is the gap above your contract.
+    wholesale_fee_target = max(5_000.0, min(15_000.0, arv * 0.05))
+    wholesale = {
+        "investor_price": round(rule70),
+        "fee_target": round(wholesale_fee_target),
+        "max_contract_price": round(max(0.0, rule70 - wholesale_fee_target)),
+        "works_at_asking": bool(asking_price and rule70 - wholesale_fee_target >= asking_price),
+    }
+
+    rent_taxes = arv * loc["property_tax_pct"] / 100.0  # sale resets the assessment
+    try:
+        rental_exit = rental.analyse(subject, arv, rehab_total, reno.get("tier"),
+                                     mao if feasible else None, asking_price,
+                                     {**offer.DEFAULTS, **params,
+                                      **{k: o[k] for k in ("rent_override", "management_pct",
+                                                           "refi_rate_pct", "refi_ltv_pct")
+                                         if o.get(k) not in (None, "")}}, rent_taxes)
+    except Exception as exc:  # never let the rental view break the analysis
+        rental_exit = {"available": False, "reason": f"Rental analysis failed: {exc}"}
+
     result = {
         "subject": subject,
         "off_market": off_market,
+        "hold": hold,
+        "wholesale": wholesale,
+        "rental": rental_exit,
         "asking_price": round(asking_price) if asking_price else None,
         "arv": comp_result,
         "rehab": reno,
@@ -157,6 +210,20 @@ def analyze(address: str,
     }
     result["flags"] = riskflags.build(result)
     return result
+
+
+def _hold_period(tier: str | None, comp_result: dict) -> dict:
+    rehab_m = rental.REHAB_MONTHS.get(tier or "moderate", 2.5)
+    doms = [c.get("days_on_mls") for c in comp_result.get("comps", [])
+            if c.get("condition") == "renovated" and c.get("days_on_mls")]
+    if len(doms) < 3:
+        doms = [c.get("days_on_mls") for c in comp_result.get("comps", []) if c.get("days_on_mls")]
+    dom = float(sorted(doms)[len(doms) // 2]) if doms else 60.0
+    sell_m = dom / 30.4
+    months = round(rehab_m + sell_m + 1.0, 1)
+    return {"months": months, "rehab_months": rehab_m, "market_days": round(dom),
+            "closing_months": 1.0, "source": "computed",
+            "detail": f"{rehab_m:g} mo renovation + {dom:.0f} days on market + 1 mo to close"}
 
 
 def _offmarket_subject(address: str, o: dict) -> dict | None:

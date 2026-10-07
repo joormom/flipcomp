@@ -128,7 +128,10 @@
       <button class="mode" id="mode-find">Find deals</button>
       <button class="mode" id="mode-leads">Leads</button>
       <button class="mode" id="mode-record">Property record</button>
+      <button class="mode" id="mode-pipeline">Pipeline <span id="pipe_due" class="badge b-bad" style="display:none;margin-left:4px;font-size:10px;padding:1px 6px"></span></button>
+      <button class="mode" id="mode-team" style="display:none">Team</button>
     </div>
+    <span id="me_tag" class="tag" style="display:none;width:100%;text-align:right"></span>
   </header>
 
   <div class="card" id="record-panel" style="display:none">
@@ -167,6 +170,7 @@
     <div class="chips" style="margin-top:12px">
       <span class="chip on" id="l_adjacent">Include neighbouring counties</span>
       <span class="chip" id="l_metro">Include Tulsa County (large metro)</span>
+      <span class="chip focus-only">Owasso / Collinsville schools only</span>
       <span style="flex:1"></span>
       <span class="chip" data-days="1">1 day</span>
       <span class="chip" data-days="3">3 days</span>
@@ -178,6 +182,14 @@
       unpaid property tax and city liens from the county treasurer, expired listings,
       listings whose wording gives the game away, price cuts between scans, and
       court filings (foreclosure, probate, divorce) with a one-time browser check.
+      Owasso and Collinsville school districts are searched by their official boundaries and scored up.
+    </div>
+    <div class="row owner-only" style="margin-top:12px;align-items:flex-end">
+      <div style="flex:2;min-width:240px"><label>Import assessor roll (CSV or Excel from an Open Records request)</label>
+        <input type="file" id="roll_file" accept=".csv,.txt,.tsv,.xlsx,.xls"></div>
+      <div><label>County</label><select id="roll_county"><option value="tulsa">Tulsa</option><option value="rogers">Rogers</option><option value="washington">Washington</option><option value="osage">Osage</option></select></div>
+      <div style="flex:0 0 auto"><button id="roll_go" class="ghost">Import &amp; score</button></div>
+      <div class="muted" style="flex:2;min-width:220px">Finds out-of-state, long-held, inherited and non-owner-occupied houses before they list. See <code>docs/pre-market-playbook.md</code> for the request to send.</div>
     </div>
   </div>
 
@@ -198,11 +210,88 @@
     <div class="chips" style="margin-top:12px">
       <span class="chip on" id="f_adjacent">Include neighbouring counties</span>
       <span class="chip" id="f_metro">Include Tulsa County (large metro)</span>
+      <span class="chip focus-only">Owasso / Collinsville schools only</span>
     </div>
     <div class="muted" style="margin-top:11px">
       Scans every active listing in the region against the last 12 months of sales,
       ranks them by how far your maximum offer sits above the asking price, then runs
       the full comp analysis on the strongest. Takes a couple of minutes on a cold cache.
+    </div>
+  </div>
+
+  <div class="card" id="pipeline-panel" style="display:none">
+    <div class="row">
+      <div><label>Your name (signs letters)</label><input id="b_name" placeholder="Your name"></div>
+      <div><label>Phone</label><input id="b_phone" placeholder="918-555-0100"></div>
+      <div><label>Email (optional)</label><input id="b_email"></div>
+      <div><label>Company (optional)</label><input id="b_company"></div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end"><button id="b_save" class="ghost">Save</button></div>
+    </div>
+    <div class="row" style="margin-top:12px;align-items:center">
+      <div style="flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="p_refresh">Refresh</button>
+        <a class="ghost" id="p_letters" href="/letters?source=pipeline" target="_blank" style="text-decoration:none"><button class="ghost" type="button">Letters: open deals</button></a>
+        <a href="/letters?source=tax&n=50" target="_blank" style="text-decoration:none"><button class="ghost" type="button">Letters: top 50 tax leads</button></a>
+        <a href="/api/mailers.csv?source=tax&n=250" style="text-decoration:none"><button class="ghost" type="button">Mail-merge CSV</button></a>
+      </div>
+      <div class="muted" style="flex:1;min-width:220px">Most deals close on the fourth or fifth touch. Every stage change sets the next follow-up; the daily report leads with what is due.</div>
+    </div>
+  </div>
+
+  <div id="team-panel" style="display:none">
+    <div class="card">
+      <h2>Share online</h2>
+      <div id="t_share" class="muted">Loading...</div>
+      <details class="adv"><summary>Use a fixed address instead (needs a free Cloudflare account and a domain)</summary>
+        <div class="muted" style="margin-bottom:10px">The free quick address changes every time the app restarts; the daily
+          email always carries everyone's current link, so that is usually fine. For an address that never changes, create a
+          tunnel in the Cloudflare dashboard (Zero Trust &rarr; Networks &rarr; Tunnels), point its public hostname at
+          <code>http://127.0.0.1:8777</code>, and paste the tunnel token and the address here.</div>
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:2;min-width:220px"><label>Public address</label><input id="t_public" placeholder="https://deals.yourdomain.com"></div>
+          <div style="flex:2;min-width:220px"><label>Tunnel token</label><input id="t_token" type="password" autocomplete="off"></div>
+          <div style="flex:0 0 auto"><button class="ghost" id="t_fixed_save" type="button">Save</button></div>
+          <div style="flex:0 0 auto"><button class="ghost" id="t_fixed_clear" type="button">Go back to quick address</button></div>
+        </div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>People</h2>
+      <div id="t_people" class="muted">Loading...</div>
+      <div class="row" style="margin-top:14px;align-items:flex-end">
+        <div><label>Name</label><input id="t_name" placeholder="Partner's name" autocomplete="off"></div>
+        <div style="flex:2"><label>Email</label><input id="t_email" placeholder="partner@example.com" autocomplete="off"></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><span class="chip on" id="t_daily">Daily email</span></div>
+        <div style="flex:0 0 auto"><button id="t_add" type="button">Add person</button></div>
+      </div>
+      <div class="muted" style="margin-top:10px">Each person gets their own private link. Opening it signs that browser in;
+        anyone without a link sees a "this is private" page. <b>New link</b> locks the old one out, and <b>Remove</b> locks the person out.
+        Partners share the pipeline and sign owner letters with their own name, but cannot change people, email or the skip list.</div>
+    </div>
+    <div class="card">
+      <h2>Daily email</h2>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:2;min-width:220px"><label>Send from (Gmail address)</label><input id="t_smtp_user" placeholder="you@gmail.com" autocomplete="off"></div>
+        <div style="flex:2;min-width:200px"><label>Gmail app password</label><input id="t_smtp_pass" type="password" autocomplete="new-password"></div>
+        <div><label>From name</label><input id="t_from_name" placeholder="FlipComp"></div>
+        <div style="flex:0 0 auto"><button class="ghost" id="t_mail_save" type="button">Save</button></div>
+      </div>
+      <details class="adv"><summary>Not Gmail?</summary>
+        <div class="row"><div><label>SMTP server</label><input id="t_smtp_host"></div>
+        <div><label>Port</label><input id="t_smtp_port" inputmode="numeric"></div></div>
+      </details>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div style="flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="ghost" id="t_send_me" type="button">Send today's email to me</button>
+          <button class="ghost" id="t_send_all" type="button">Send to everyone now</button>
+        </div>
+        <div id="t_mail_note" class="muted" style="flex:1;min-width:220px"></div>
+      </div>
+      <div class="muted" style="margin-top:10px">Gmail needs an <b>app password</b>, not your normal password: turn on 2-Step
+        Verification, then Google Account &rarr; Security &rarr; App passwords, create one called FlipComp, and paste the
+        16 letters here. The email goes out automatically after the morning run (<code>daily.bat</code>) to everyone with
+        "Daily email" on. It holds follow-ups due, new Owasso/Collinsville properties, new Find Deals hits and the top new
+        leads, with each person's own link into the app.</div>
     </div>
   </div>
 
@@ -276,6 +365,9 @@
         <div><label>Subject sqft override</label><input id="subject_sqft" placeholder="from listing" inputmode="numeric"></div>
         <div><label>Annual taxes $</label><input id="annual_taxes" placeholder="from listing" inputmode="numeric"></div>
         <div><label>Annual insurance $</label><input id="annual_insurance" placeholder="1800" inputmode="numeric"></div>
+        <div><label>Rent override $/mo</label><input id="rent_override" placeholder="from local rents / HUD" inputmode="numeric"></div>
+        <div><label>Management % (0 = self)</label><input id="management_pct" placeholder="10" inputmode="numeric"></div>
+        <div><label>Refi rate %</label><input id="refi_rate_pct" placeholder="7.5" inputmode="numeric"></div>
       </div>
     </details>
   </div>
@@ -288,6 +380,45 @@ const $ = id => document.getElementById(id);
 const fmt = n => n===null||n===undefined||isNaN(n) ? "--" : "$" + Math.round(n).toLocaleString();
 const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const sign = n => (n>=0?"pos":"neg");
+
+// Slow requests run as server-side jobs that the page polls, so a scan that
+// takes minutes still works through the sharing tunnel (it cuts requests at 100s).
+async function jobFetch(url, opts){
+  const start = await fetch("/api/jobs", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({route: url, payload: JSON.parse((opts && opts.body) || "{}")})});
+  const s = await start.json();
+  if(!start.ok) return {ok:false, status:start.status, json: async () => s};
+  const t0 = Date.now();
+  let misses = 0;
+  while(Date.now() - t0 < 30*60*1000){
+    await new Promise(r => setTimeout(r, 1500));
+    let p;
+    try{
+      const r = await fetch("/api/jobs/" + s.id);
+      p = await r.json();
+      if(!r.ok) return {ok:false, status:r.status, json: async () => p};
+    }catch(e){ if(++misses > 20) throw e; continue; }
+    misses = 0;
+    if(p.done) return {ok: p.status >= 200 && p.status < 300, status: p.status, json: async () => p.result};
+  }
+  throw new Error("Timed out waiting for the server.");
+}
+
+let ME = {role:"owner", name:""};
+async function loadMe(){
+  try{
+    const r = await fetch("/api/me");
+    if(r.status === 401){ location.reload(); return; }
+    ME = await r.json();
+  }catch(e){}
+  const owner = ME.role === "owner";
+  $("mode-team").style.display = owner ? "" : "none";
+  document.querySelectorAll(".owner-only").forEach(el => el.style.display = owner ? "" : "none");
+  if(!ME.local || ME.team_size > 1){
+    $("me_tag").style.display = "";
+    $("me_tag").textContent = "Signed in as " + (ME.name || "you");
+  }
+}
 
 const OFFER_KEYS = ["hold_months","agent_commission_pct","transfer_tax_pct","buy_closing_pct",
   "interest_rate_pct","points_pct","loan_to_purchase_pct","min_profit_flat","target_profit_pct",
@@ -315,7 +446,7 @@ async function boot(){
 function overrides(){
   const o = {};
   for(const k of OFFER_KEYS) if($(k).value.trim()) o[k] = $(k).value.trim();
-  for(const k of ["rehab_contingency_pct","rehab_override_total","subject_sqft"])
+  for(const k of ["rehab_contingency_pct","rehab_override_total","subject_sqft","rent_override","management_pct","refi_rate_pct"])
     if($(k).value.trim()) o[k] = $(k).value.trim();
   if($("rehab_tier").value) o.rehab_tier = $("rehab_tier").value;
   if($("cash_purchase").value) o.cash_purchase = true;
@@ -332,7 +463,7 @@ async function run(){
     + 'pulling recent sales nearby, and adjusting comps. First run in a new market '
     + 'takes 20-60 seconds.</span></div>';
   try{
-    const res = await fetch("/api/analyze", {
+    const res = await jobFetch("/api/analyze", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({address, asking_price: $("asking").value.replace(/[^0-9.]/g,""),
                             overrides: overrides()})
@@ -343,6 +474,48 @@ async function run(){
   }catch(e){
     $("out").innerHTML = `<div class="err">Could not reach the server: ${esc(e.message)}</div>`;
   }finally{ btn.disabled = false; btn.textContent = "Analyze"; }
+}
+
+function condBadge(c){
+  const m = {renovated:["renovated","b-good"], distressed:["distressed","b-bad"], mixed:["mixed","b-warn"]}[c];
+  return m ? `<span class="badge ${m[1]}" style="font-size:10px;padding:2px 7px">${m[0]}</span>` : `<span class="dimtxt">&ndash;</span>`;
+}
+
+function exitPanel(d){
+  const o = d.offer||{}, W = d.wholesale||{}, R = d.rental||{};
+  const callCls = c => ({STRONG:"b-good", WORKS:"b-good", THIN:"b-warn", NO:"b-bad"}[c]||"b-warn");
+  let h = `<div class="card"><h2>Exit strategies &mdash; same house, three ways to make money</h2><div class="grid4" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">`;
+  // flip
+  h += `<div class="deal" style="margin:0"><div class="deal-top"><b>Flip</b>
+      <span class="badge ${o.feasible?"b-good":"b-bad"}">${o.feasible?"MAX "+fmt(o.mao):"NOT VIABLE"}</span></div>
+    <div class="sub" style="margin-top:6px">Renovate and resell at ${fmt((d.arv||{}).arv)}.
+      ${o.feasible?`Pay up to ${fmt(o.mao)} to clear ${fmt(o.target_profit)}.`:"No price clears your profit target."}
+      ${d.hold?` Hold about ${d.hold.months} months (${esc(d.hold.detail)}).`:""}</div></div>`;
+  // wholesale
+  h += `<div class="deal" style="margin:0"><div class="deal-top"><b>Wholesale</b>
+      <span class="badge ${W.works_at_asking?"b-good":"b-warn"}">${W.max_contract_price?"&le; "+fmt(W.max_contract_price):"&mdash;"}</span></div>
+    <div class="sub" style="margin-top:6px">Get it under contract and assign it. A flipper will pay about ${fmt(W.investor_price)}
+      (the 70% rule), so contract at ${fmt(W.max_contract_price)} or less to earn a ${fmt(W.fee_target)} fee with no rehab and no loan.
+      ${d.asking_price?(W.works_at_asking?" <b>Works at the asking price.</b>":" Needs a price below asking."):""}</div></div>`;
+  // rental
+  if(R.available){
+    const ref = R.at_asking || R.at_max || {};
+    h += `<div class="deal" style="margin:0"><div class="deal-top"><b>Rent (BRRRR)</b>
+        <span class="badge ${callCls(R.call)}">${esc(R.call)}</span></div>
+      <div class="sub" style="margin-top:6px">${esc(R.why)}</div>
+      <div class="deal-num" style="margin-top:8px">
+        <div><span>Rent</span><b>${fmt(R.rent.rent)}/mo</b></div>
+        <div><span>Refi</span><b>${ref.refi_ltv_pct!=null?ref.refi_ltv_pct+"%":"--"}</b></div>
+        <div><span>Cash left in</span><b class="${(ref.cash_left_in_deal||0)<=0?"pos":""}">${fmt(ref.cash_left_in_deal)}</b></div>
+        <div><span>Cap rate</span><b>${ref.cap_rate_pct!=null?ref.cap_rate_pct+"%":"--"}</b></div>
+        <div><span>DSCR</span><b>${ref.dscr??"--"}</b></div></div>
+      <div class="sub" style="margin-top:6px">Rent from ${esc(R.rent.source)}. Pay ${fmt(R.max_price_all_cash_out)} or less and the refinance
+        returns every dollar. ${d.asking_price?"Figures at the asking price.":"Figures at the all-cash-out price."}</div></div>`;
+  } else {
+    h += `<div class="deal" style="margin:0"><div class="deal-top"><b>Rent (BRRRR)</b><span class="badge b-warn">NO DATA</span></div>
+      <div class="sub" style="margin-top:6px">${esc(R.reason||"No rent data.")}</div></div>`;
+  }
+  return h + `</div></div>`;
 }
 
 function render(d){
@@ -364,13 +537,16 @@ function render(d){
 
   h += `<div class="hero">
     <div><div class="k">ARV (resale)</div><div class="v">${fmt(a.arv)}</div>
-      <div class="s">${fmt(a.arv_low)} &ndash; ${fmt(a.arv_high)}${a.arv_psf?" &middot; $"+a.arv_psf+"/sqft":""}</div></div>
+      <div class="s">${fmt(a.arv_low)} &ndash; ${fmt(a.arv_high)}${a.arv_psf?" &middot; $"+a.arv_psf+"/sqft":""}</div>
+      <div class="s">${a.renovated_comps_used!=null?`${a.renovated_comps_used} renovated comp${a.renovated_comps_used===1?"":"s"}`:""}${a.as_is_low?` &middot; as-is ${fmt(a.as_is_low)}&ndash;${fmt(a.as_is_high)}`:""}</div></div>
     <div><div class="k">Renovation</div><div class="v">${fmt(r.total)}</div>
       <div class="s">${esc(r.tier_label)}${r.psf_all_in?" &middot; $"+r.psf_all_in+"/sqft":""}</div></div>
     <div><div class="k">Max offer</div><div class="v">${o.feasible?fmt(o.mao):"&mdash;"}</div>
       <div class="s">${o.feasible?"to net "+fmt(o.target_profit):"no viable price"}</div></div>
     <div><div class="k">Confidence</div><div class="v">${a.confidence}<span style="font-size:15px;color:var(--faint)">/100</span></div>
       <div class="s">${esc(a.confidence_label)} &middot; ${a.comp_count} comps</div>
+      ${a.confidence_within10_pct!=null?`<div class="s">at this confidence ${Math.round(a.confidence_within10_pct)}% land within 10%</div>`:""}
+      ${a.accuracy?`<div class="s" title="${esc(a.accuracy_text||"")}">backtest here: typically &plusmn;${Math.round(a.accuracy.median_abs_error_pct)}%</div>`:""}
       <div class="bar"><i style="width:${a.confidence}%"></i></div></div>
   </div>`;
 
@@ -404,7 +580,7 @@ function render(d){
     ["Purchase", x=>fmt(x.purchase_price)],
     ["Renovation", x=>fmt(x.rehab)],
     ["Buy closing", x=>fmt(x.buy_closing)],
-    ["Holding ("+(m.holding.months)+" mo)", x=>fmt(x.holding.total)],
+    ["Holding ("+(m.holding.months)+" mo"+(d.hold&&d.hold.source==="computed"?", computed":"")+")", x=>fmt(x.holding.total)],
     ["Financing", x=>fmt(x.financing.total)],
     ["Selling costs", x=>fmt(x.selling.total)],
   ];
@@ -439,6 +615,13 @@ function render(d){
   }
   h += `</div></div>`;
 
+  // --- exit strategies ---
+  h += exitPanel(d);
+  const TR = d.tax_roll || {};
+  h += `<div style="margin:-6px 0 16px">${pipeButton({address: s.formatted_address, asking: d.asking_price,
+    mao: o.feasible ? o.mao : null, arv: a.arv, rehab: r.total, owner: TR.owner, url: s.property_url,
+    detail_url: TR.detail_url, source: "analysis", note: `Analysed: ${v.call}, max ${o.feasible?fmt(o.mao):"n/a"}`})}</div>`;
+
   // --- stress ---
   const st = o.stress;
   h += `<div class="card"><h2>If things go wrong (buying at max offer)</h2><div class="tblwrap"><table>
@@ -471,13 +654,14 @@ function render(d){
       Each sale is adjusted to match the subject, then weighted by distance, recency and similarity.
     </div><div class="tblwrap"><table>
     <thead><tr><th>Address</th><th>Sold</th><th>Ago</th><th>Dist</th><th>Sqft</th><th>Bd</th>
-    <th>Built</th><th>Adjust</th><th>Adjusted</th><th>Weight</th></tr></thead><tbody>`;
+    <th>Built</th><th>Condition</th><th>Adjust</th><th>Adjusted</th><th>Weight</th></tr></thead><tbody>`;
   for(const c of a.comps){
     h += `<tr><td>${esc(c.formatted_address||"")}</td>
       <td>${fmt(c.sold_price)}</td><td class="dimtxt">${c.months_ago}mo</td>
       <td class="dimtxt">${c.distance_mi}mi</td>
       <td>${c.sqft?Math.round(c.sqft).toLocaleString():"--"}</td>
       <td>${c.beds??"--"}</td><td class="dimtxt">${c.year_built?Math.round(c.year_built):"--"}</td>
+      <td>${condBadge(c.condition)}</td>
       <td class="${sign(c.net_adjustment)}">${c.net_adjustment>=0?"+":""}${fmt(c.net_adjustment)}</td>
       <td><b>${fmt(c.adjusted_value)}</b></td>
       <td class="dimtxt">${c.weight_pct}%</td></tr>`;
@@ -491,7 +675,9 @@ function render(d){
 }
 
 // ---------- region deal search ----------
-const MODES = {one:"one-panel", find:"find-panel", leads:"leads-panel", record:"record-panel"};
+const MODES = {one:"one-panel", find:"find-panel", leads:"leads-panel", record:"record-panel", pipeline:"pipeline-panel", team:"team-panel"};
+$("mode-team").onclick = () => { setMode("team"); loadTeam(); };
+$("mode-pipeline").onclick = () => { setMode("pipeline"); loadPipeline(); };
 $("mode-record").onclick = () => setMode("record");
 function setMode(name, keepOut){
   for(const [k,id] of Object.entries(MODES)){
@@ -499,7 +685,7 @@ function setMode(name, keepOut){
     $("mode-"+k).classList.toggle("on", k===name);
   }
   // The skip list only matters where a whole region is scanned.
-  $("skip-panel").style.display = (name==="find" || name==="leads") ? "" : "none";
+  $("skip-panel").style.display = ((name==="find" || name==="leads") && ME.role==="owner") ? "" : "none";
   if(!keepOut) $("out").innerHTML = "";
 }
 
@@ -562,7 +748,7 @@ async function runSearch(){
     + 'full comp analysis on the best. This takes a couple of minutes the first time; '
     + 'later scans of the same region are much faster.</span></div>';
   try{
-    const res = await fetch("/api/search", {
+    const res = await jobFetch("/api/search", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
         county: $("f_county").value,
@@ -591,6 +777,8 @@ function verdictClass(v){
 }
 
 function renderSearch(d){
+  LAST_SEARCH = d;
+  d = {...d, verified: (d.verified||[]).filter(inFocus), candidates: (d.candidates||[]).filter(inFocus)};
   const ver = d.verified || [];
   const seen = new Set(ver.map(v => v.address));
   const rest = (d.candidates||[]).filter(c => !seen.has(c.address));
@@ -617,7 +805,7 @@ function renderSearch(d){
       }
       h += `<div class="deal">
         <div class="deal-top">
-          <span class="deal-addr">${esc(v.address)}</span>
+          <span class="deal-addr">${esc(v.address)}${schoolBadge(v)}</span>
           <span class="badge ${verdictClass(v.verdict)}">${esc(v.verdict)}</span>
         </div>
         <div class="sub">${v.beds??"?"} bd &middot; ${v.baths??"?"} ba &middot;
@@ -653,7 +841,7 @@ function renderSearch(d){
       <th>Est max offer</th><th>Spread</th><th>Comps</th></tr></thead><tbody>`;
     for(const c of rest)
       h += `<tr><td>${c.url?`<a href="${esc(c.url)}" target="_blank" rel="noopener"
-          style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--faint)">${esc(c.address)}</a>`:esc(c.address)}
+          style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--faint)">${esc(c.address)}</a>`:esc(c.address)}${schoolBadge(c)}
         <div class="sub">${esc(c.city||"")}${c.year_built?" &middot; built "+c.year_built:""}
         ${c.url?` &middot; <a href="${esc(c.url)}" target="_blank" rel="noopener">listing &rarr;</a>`:""}
         &middot; <a href="#" class="analyze-link" data-addr="${esc(c.address)}" data-price="${c.price||""}">comp it</a></div></td>
@@ -678,9 +866,24 @@ const TAG_LABEL = {
   motivated:"motivated", price_cut_text:"reduced", vacant:"vacant", life_event:"life event",
   tenant:"tenant", stale:"stale", below_last_sale:"below last sale", price_cut:"price cut",
   under_avm:"under estimate", expired:"expired", tax_3yr:"3yr tax", tax_2yr:"2yr tax",
-  tax_1yr:"1yr tax", city_lien:"city lien", absentee:"absentee",
+  tax_1yr:"1yr tax", city_lien:"city lien", absentee:"absentee", focus_school:"focus district",
+  out_of_state:"out-of-state owner", long_tenure:"long-held", no_homestead:"no homestead",
+  trust:"trust", senior:"senior", entity:"company-owned", dated:"original condition",
 };
-const HOT = new Set(["foreclosure","short_sale","auction","tax_3yr","city_lien","estate"]);
+const HOT = new Set(["foreclosure","short_sale","auction","tax_3yr","city_lien","estate","focus_school","out_of_state"]);
+let FOCUS_ONLY = false, LAST_LEADS = null, LAST_SEARCH = null;
+document.querySelectorAll(".focus-only").forEach(c => c.onclick = () => {
+  FOCUS_ONLY = !FOCUS_ONLY;
+  document.querySelectorAll(".focus-only").forEach(x => x.classList.toggle("on", FOCUS_ONLY));
+  if(LAST_LEADS && $("leads-panel").style.display !== "none") renderLeads(LAST_LEADS);
+  if(LAST_SEARCH && $("find-panel").style.display !== "none") renderSearch(LAST_SEARCH);
+  if(LAST_ROLL && $("leads-panel").style.display !== "none" && SHOWING_ROLL) renderRoll(LAST_ROLL);
+});
+let LAST_ROLL = null, SHOWING_ROLL = false;
+const inFocus = x => !FOCUS_ONLY || !!x.school_district;
+function schoolBadge(x){
+  return x && x.school ? `<span class="badge b-good" style="font-size:10px;padding:2px 8px;margin-left:6px">${esc(x.school)}</span>` : "";
+}
 function tagChips(tags){
   return (tags||[]).map(t => `<span class="tagc ${HOT.has(t)?"hot":""}">${esc(TAG_LABEL[t]||t)}</span>`).join("");
 }
@@ -694,6 +897,10 @@ function leadLinks(l){
   if(l.detail_url) bits.push(`<a href="${esc(l.detail_url)}" target="_blank" rel="noopener">tax roll</a>`);
   if(l.address) bits.push(mapLink(l.address));
   if(l.address) bits.push(`<a href="#" class="analyze-link" data-addr="${esc(l.address)}" data-price="${l.price||l.listing_price||""}">comp it</a>`);
+  if(l.address) bits.push(pipeLink({address: l.address + (l.city || l.location_city ? "" : ""), owner: l.owner,
+    mailing_address: l.mailing_address, url: l.url || l.listing_url, detail_url: l.detail_url,
+    asking: l.price || l.listing_price, source: l.kind || "lead",
+    note: "From leads: " + (l.tags||[]).join(", ")}));
   return bits.join(" &middot; ");
 }
 function scoreBadge(s){
@@ -708,7 +915,7 @@ async function runLeads(){
     + 'listings, pulling the county tax roll, resolving delinquent parcels to addresses, '
     + 'and cross-referencing. A cold run takes one to three minutes.</span></div>';
   try{
-    const res = await fetch("/api/leads", {
+    const res = await jobFetch("/api/leads", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
         county: $("l_county").value,
@@ -725,6 +932,50 @@ async function runLeads(){
   }finally{ btn.disabled = false; btn.textContent = "Find leads"; }
 }
 $("l_go").onclick = runLeads;
+
+$("roll_go").onclick = async () => {
+  const f = $("roll_file").files[0];
+  if(!f){ $("roll_file").click(); return; }
+  const btn = $("roll_go"); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Scoring';
+  try{
+    const buf = new Uint8Array(await f.arrayBuffer());
+    let bin = ""; for(let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    const res = await fetch("/api/roll/import", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({filename: f.name, county: $("roll_county").value, content_b64: btoa(bin)})});
+    const d = await res.json();
+    if(!res.ok){ $("out").innerHTML = `<div class="err">${esc(d.error||"Import failed.")}</div>`; return; }
+    renderRoll(d);
+  }catch(e){ $("out").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  finally{ btn.disabled = false; btn.textContent = "Import & score"; }
+};
+
+function renderRoll(d){
+  LAST_ROLL = d; SHOWING_ROLL = true;
+  const rows = (d.leads||[]).filter(inFocus);
+  const sc = d.signal_counts || {};
+  let h = `<div class="card"><h2>Assessor roll &mdash; pre-market leads</h2>
+    <div class="deal-num">
+      <div><span>Parcels read</span><b>${(d.rows||0).toLocaleString()}</b></div>
+      <div><span>Leads</span><b>${(d.count||0).toLocaleString()}</b></div>
+      <div><span>In focus districts</span><b class="pos">${(d.in_focus||0).toLocaleString()}</b></div>
+      ${Object.entries(sc).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<div><span>${esc(TAG_LABEL[k]||k)}</span><b>${v.toLocaleString()}</b></div>`).join("")}
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/letters?source=roll&n=100&focus=1" target="_blank"><button class="ghost" type="button">Letters: top 100 in focus districts</button></a>
+      <a href="/letters?source=roll&n=100" target="_blank"><button class="ghost" type="button">Letters: top 100 overall</button></a>
+      <a href="/api/mailers.csv?source=roll&n=1000"><button class="ghost" type="button">Mail-merge CSV</button></a>
+    </div>
+    ${d.diff && !d.diff.first_run ? `<div class="muted" style="margin-top:8px">${(d.diff.new||[]).length} new since the last import of this county.</div>` : ""}
+  </div>`;
+  h += `<div class="card"><div class="tblwrap"><table><thead><tr><th>Address</th><th>Owner</th><th>Owned since</th><th>Built</th><th>Score</th></tr></thead><tbody>`;
+  for(const l of rows.slice(0,200))
+    h += `<tr><td>${esc(l.address)}${l.location_city?`, ${esc(l.location_city)}`:""}${schoolBadge(l)}<div class="sub">${tagChips(l.tags)} ${leadLinks(l)}</div></td>
+      <td style="white-space:normal;max-width:240px;text-align:left">${esc(l.owner)}<div class="sub">${esc(l.mailing_address||"")}</div></td>
+      <td class="dimtxt">${esc(l.sale_date||"--")}</td><td class="dimtxt">${l.year_built?Math.round(l.year_built):"--"}</td><td>${scoreBadge(l.score)}</td></tr>`;
+  h += `</tbody></table></div></div>`;
+  $("out").innerHTML = h;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
 
 function propLine(l){
   const bits = [];
@@ -756,7 +1007,7 @@ function diffRow(r, notes){
   if(r.owner) facts.push(`owner ${esc(r.owner)}`);
   const kind = {listed:"Listed",expired:"Expired",tax:"Tax roll",deal:"Deal scan"}[r.kind]||r.kind||"";
   return `<div class="deal" style="padding:10px 13px">
-    <div class="deal-top"><span class="deal-addr">${r.score!=null?scoreBadge(r.score)+" ":""}${esc(r.address||"(no address)")}
+    <div class="deal-top"><span class="deal-addr">${r.score!=null?scoreBadge(r.score)+" ":""}${esc(r.address||"(no address)")}${schoolBadge({school: {owasso:"Owasso SD", collinsville:"Collinsville SD"}[r.school_district]})}
       <span class="pill">${esc(kind)}${r.city?" · "+esc(r.city):""}</span></span>
       <span class="sub">${r.first_seen?"first seen "+esc(r.first_seen):""}${r.dropped_on?" · gone "+esc(r.dropped_on):""}</span></div>
     <div class="sub">${facts.join(" &middot; ")}</div>
@@ -811,6 +1062,8 @@ async function whatsNew(){
 $("l_new").onclick = whatsNew;
 
 function renderLeads(d){
+  LAST_LEADS = d; SHOWING_ROLL = false;
+  d = {...d, listed: (d.listed||[]).filter(inFocus), expired: (d.expired||[]).filter(inFocus), tax: (d.tax||[]).filter(inFocus)};
   const st = d.stats || {};
   let h = diffBlock(d.diff, "Leads");
 
@@ -824,6 +1077,8 @@ function renderLeads(d){
       <div><span>3+ yrs behind</span><b>${st.tax_3yr||0}</b></div>
       <div><span>City liens</span><b>${st.city_liens||0}</b></div>
       <div><span>Listed &amp; delinquent</span><b class="neg">${st.listed_and_delinquent||0}</b></div>
+      ${st.in_focus?`<div><span>In Owasso SD</span><b class="pos">${st.in_focus.owasso||0}</b></div>
+      <div><span>In Collinsville SD</span><b class="pos">${st.in_focus.collinsville||0}</b></div>`:""}
     </div></div>`;
 
   // --- court records (assisted) ---
@@ -884,7 +1139,7 @@ function renderLeads(d){
       ${land?` ${land} land-only parcels hidden.`:""}${unresolved?` ${unresolved} more not yet resolved to an address (raise the max).`:""}</div>
       <div class="tblwrap"><table><thead><tr><th>Address</th><th>Owner</th><th>Years</th><th>Tax owed</th><th>Liens</th><th>Implied value</th><th>Score</th></tr></thead><tbody>`;
     for(const t of tax)
-      h += `<tr><td>${esc(t.address)}<div class="sub">${tagChips(t.tags)} ${leadLinks(t)}</div></td>
+      h += `<tr><td>${esc(t.address)}${schoolBadge(t)}<div class="sub">${tagChips(t.tags)} ${leadLinks(t)}</div></td>
         <td class="dimtxt" style="white-space:normal;max-width:180px">${esc(t.owner||"")}${t.mailing_address&&t.tags.includes("absentee")?`<div class="sub">mail: ${esc(t.mailing_address)}</div>`:""}</td>
         <td>${t.years_behind}${t.unpaid_years&&t.unpaid_years.length?`<div class="sub">${t.unpaid_years.join(", ")}</div>`:""}</td>
         <td>${fmt(t.tax_owed)}</td><td>${t.liens_owed?fmt(t.liens_owed):"--"}</td>
@@ -912,7 +1167,7 @@ function leadCard(l){
   const top = (l.signals||[]).slice().sort((a,b)=>b.weight-a.weight).slice(0,3);
   return `<div class="deal">
     <div class="deal-top">
-      <span class="deal-addr">${esc(l.address)}</span>
+      <span class="deal-addr">${esc(l.address)}${schoolBadge(l)}</span>
       <span>${scoreBadge(l.score)} <span class="badge ${l.kind==="expired"?"b-warn":"b-good"}" style="margin-left:6px">${l.kind==="expired"?"EXPIRED":esc(l.status||"LISTED")}</span></span>
     </div>
     <div class="sub">${propLine(l)}${l.days_on_mls?` &middot; ${Math.round(l.days_on_mls)} days on market`:""}
@@ -963,7 +1218,7 @@ async function runRecord(){
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Pulling records';
   $("out").innerHTML = '<div class="card"><span class="muted">Reading the treasurer\'s roll, the parcel record and Realtor.com history. About 15 seconds.</span></div>';
   try{
-    const res = await fetch("/api/dossier", {method:"POST", headers:{"Content-Type":"application/json"},
+    const res = await jobFetch("/api/dossier", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({address, county: $("r_county").value})});
     const d = await res.json();
     if(!res.ok) $("out").innerHTML = `<div class="err">${esc(d.error||"Lookup failed.")}</div>`;
@@ -1035,15 +1290,260 @@ function renderRecord(d){
     for(const s of d.seen_by_app) h += `<div class="sub">${esc(s.kind)} lead since ${esc(s.first_seen)} &middot; score ${s.score} &middot; ${tagChips(s.tags)}</div>`;
     h += `</div>`;
   }
+  h += `<div style="margin-bottom:14px">${pipeButton({address: d.normalised||d.address, owner: d.owner,
+    mailing_address: d.mailing_address, detail_url: d.tax_roll_url, url: L&&L.property_url,
+    asking: L&&L.list_price, source: "property record", note: "Looked up from a drive-by"})}</div>`;
   h += `<div class="muted">Sources: ${(d.sources||[]).map(s=>`${esc(s.name)} ${s.ok?"&#10003;":"&#10007;"}`).join(" &middot; ")}. Public records only; verify title at the county clerk before offering.</div>`;
   $("out").innerHTML = h;
   window.scrollTo({top:0, behavior:"smooth"});
 }
 
+// ---------- pipeline ----------
+let STAGES = [];
+async function addToPipeline(fields, btn){
+  try{
+    const res = await fetch("/api/pipeline", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(fields)});
+    const d = await res.json();
+    if(btn){ btn.textContent = res.ok ? "In pipeline \u2713" : "Failed"; btn.disabled = res.ok; }
+    refreshDueBadge();
+    return d;
+  }catch(e){ if(btn) btn.textContent = "Failed"; }
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest(".pipe-link");
+  if(!a) return;
+  e.preventDefault();
+  try{ addToPipeline(JSON.parse(a.dataset.json), a); }catch(err){}
+});
+function pipeLink(fields, label){
+  return `<a href="#" class="pipe-link" data-json="${esc(JSON.stringify(fields))}">${label||"+ pipeline"}</a>`;
+}
+function pipeButton(fields){
+  return `<button class="ghost pipe-link" data-json="${esc(JSON.stringify(fields))}" type="button">Add to pipeline</button>`;
+}
+
+async function refreshDueBadge(){
+  try{
+    const d = await (await fetch("/api/pipeline")).json();
+    const n = (d.summary||{}).overdue + (d.summary||{}).due_today;
+    $("pipe_due").style.display = n ? "" : "none";
+    $("pipe_due").textContent = n;
+    return d;
+  }catch(e){}
+}
+
+async function loadPipeline(){
+  const d = await refreshDueBadge();
+  if(!d) return;
+  STAGES = d.summary.stages;
+  const B = d.buyer||{};
+  $("b_name").value = B.buyer_name||""; $("b_phone").value = B.buyer_phone||"";
+  $("b_email").value = B.buyer_email||""; $("b_company").value = B.buyer_company||"";
+  const today = new Date().toISOString().slice(0,10);
+  let h = `<div class="card"><h2>Pipeline</h2><div class="deal-num">` +
+    STAGES.map(([k,l]) => `<div><span>${esc(l)}</span><b>${d.summary.counts[k]||0}</b></div>`).join("") +
+    `<div><span>Overdue</span><b class="${d.summary.overdue?"neg":""}">${d.summary.overdue}</b></div>
+     <div><span>Due today</span><b>${d.summary.due_today}</b></div></div></div>`;
+  if(!d.deals.length){
+    h += `<div class="card"><span class="muted">Nothing in the pipeline yet. Use "Add to pipeline" on any analysis,
+      property record or lead.</span></div>`;
+    $("out").innerHTML = h; return;
+  }
+  h += `<div class="card"><div class="tblwrap"><table><thead><tr><th>Property</th><th>Stage</th><th>Next touch</th>
+    <th>Offer</th><th>Phone</th><th>Note</th><th></th></tr></thead><tbody>`;
+  for(const x of d.deals){
+    const late = x.next_follow_up && x.next_follow_up < today, due = x.next_follow_up === today;
+    const last = (x.log||[]).slice(-1)[0] || ["",""];
+    h += `<tr data-id="${esc(x.id)}">
+      <td style="min-width:220px"><b>${esc(x.address)}</b>
+        <div class="sub">${x.owner?esc(x.owner)+" &middot; ":""}${x.mao?"max "+fmt(x.mao)+" &middot; ":""}${x.arv?"ARV "+fmt(x.arv):""}</div>
+        <div class="sub">${esc(last[0])} ${esc(last[1])}</div>
+        <div class="sub">${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">listing</a> &middot; `:""}${x.detail_url?`<a href="${esc(x.detail_url)}" target="_blank" rel="noopener">tax roll</a> &middot; `:""}<a href="#" class="analyze-link" data-addr="${esc(x.address)}" data-price="${x.asking||""}">comp it</a> &middot; <a href="/letters?source=pipeline&ids=${esc(x.id)}" target="_blank">letter</a></div></td>
+      <td><select class="p_stage">${STAGES.map(([k,l]) => `<option value="${k}" ${k===x.stage?"selected":""}>${esc(l)}</option>`).join("")}</select></td>
+      <td><input type="date" class="p_next" value="${esc(x.next_follow_up||"")}" style="${late?"border-color:var(--bad)":due?"border-color:var(--warn)":""}">
+        ${late?'<div class="sub neg">overdue</div>':due?'<div class="sub" style="color:var(--warn)">today</div>':""}</td>
+      <td><input class="p_offer" value="${x.offer||""}" placeholder="$" style="width:96px" inputmode="numeric"></td>
+      <td><input class="p_phone" value="${esc(x.phone||"")}" placeholder="from skip-trace" style="width:130px"></td>
+      <td><input class="p_note" placeholder="what happened" style="min-width:160px"></td>
+      <td><button class="ghost p_save" type="button">Save</button> <button class="ghost p_del" type="button" title="Remove">&times;</button></td></tr>`;
+  }
+  h += `</tbody></table></div></div>`;
+  $("out").innerHTML = h;
+}
+
+document.addEventListener("click", async e => {
+  const save = e.target.closest(".p_save"), del = e.target.closest(".p_del");
+  if(!save && !del) return;
+  const tr = e.target.closest("tr"); const id = tr.dataset.id;
+  if(del){
+    if(!confirm("Remove this deal from the pipeline?")) return;
+    await fetch("/api/pipeline/delete", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id})});
+    return loadPipeline();
+  }
+  const f = {id, stage: tr.querySelector(".p_stage").value, next_follow_up: tr.querySelector(".p_next").value,
+             offer: tr.querySelector(".p_offer").value.replace(/[^0-9.]/g,""), phone: tr.querySelector(".p_phone").value,
+             note: tr.querySelector(".p_note").value};
+  await addToPipeline(f);
+  loadPipeline();
+});
+$("p_refresh").onclick = loadPipeline;
+$("b_save").onclick = async () => {
+  await fetch("/api/buyer", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+    buyer_name: $("b_name").value, buyer_phone: $("b_phone").value, buyer_email: $("b_email").value, buyer_company: $("b_company").value})});
+  $("b_save").textContent = "Saved \u2713"; setTimeout(() => $("b_save").textContent = "Save", 1500);
+};
+
+// ---------- team ----------
+let TEAM = null;
+async function teamPost(route, body){
+  const r = await fetch(route, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error || "Failed");
+  return d;
+}
+function ago(iso){
+  if(!iso) return "never";
+  const m = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  return m < 60 ? `${Math.max(m,1)} min ago` : m < 1440 ? `${Math.round(m/60)} h ago` : `${Math.round(m/1440)} d ago`;
+}
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); return true; }catch(e){ window.prompt("Copy this link:", t); return false; }
+}
+function renderTeam(d){
+  TEAM = d;
+  const T = d.tunnel || {}, S = d.settings || {};
+  let sh;
+  if(T.running && d.base_url){
+    sh = `<b style="color:var(--good)">Shared</b> at <a href="${esc(d.base_url)}" target="_blank" rel="noopener">${esc(d.base_url)}</a>
+      ${T.mode==="quick" ? '<span class="muted">(quick address: it changes when the app restarts; the daily email always has the current one)</span>' : ""}
+      <div style="margin-top:10px"><button class="ghost" id="t_stop" type="button">Stop sharing</button></div>`;
+  }else if(T.running){
+    sh = `<span class="spin"></span>Opening the tunnel... <a href="#" id="t_reload">refresh</a>`;
+  }else if(!T.installed){
+    sh = `<b>Not shared.</b> Sharing uses Cloudflare's free tunnel program, which is not installed yet. Install it once in a terminal:
+      <pre style="background:var(--panel2);padding:8px 10px;border-radius:8px;margin:8px 0">winget install --id Cloudflare.cloudflared</pre>
+      then start the app with <code>share.bat</code> (or press Start sharing below).
+      <div style="margin-top:10px"><button id="t_start" type="button">Start sharing</button></div>`;
+  }else{
+    sh = `<b>Not shared.</b> Only this computer can open the app right now.
+      ${T.error ? `<div class="neg" style="margin-top:6px">${esc(T.error)}</div>` : ""}
+      <div style="margin-top:10px"><button id="t_start" type="button">Start sharing</button></div>
+      <div class="muted" style="margin-top:8px">To share every time the computer starts, run <code>share.bat</code> instead of <code>server.py</code>.
+      The computer has to stay on and awake for partners to reach it.</div>`;
+  }
+  $("t_share").innerHTML = sh;
+  $("t_public").value = S.public_url || "";
+  $("t_token").placeholder = S.tunnel_token_set ? "saved (leave blank to keep)" : "paste the token";
+
+  let h = `<div class="tblwrap"><table><thead><tr><th>Person</th><th>Email</th><th>Daily email</th><th>Last used</th><th></th></tr></thead><tbody>`;
+  for(const u of d.users){
+    const owner = u.role === "owner";
+    h += `<tr data-id="${esc(u.id)}">
+      <td><input class="tu_name" value="${esc(u.name||"")}" style="min-width:120px">
+        <div class="sub">${owner ? "you (owner)" : "partner"}</div></td>
+      <td><input class="tu_email" value="${esc(u.email||"")}" placeholder="${owner?"your email, for the daily email":"email"}" style="min-width:190px"></td>
+      <td><input type="checkbox" class="tu_daily" ${u.daily_email?"checked":""} style="width:auto"></td>
+      <td class="sub">${owner && !u.last_seen ? "this computer" : esc(ago(u.last_seen))}</td>
+      <td style="white-space:nowrap">
+        <button class="ghost tu_save" type="button">Save</button>
+        ${u.link ? `<button class="ghost tu_copy" type="button" data-link="${esc(u.link)}">${owner?"Copy my phone link":"Copy link"}</button>` : ""}
+        ${u.link && !owner ? `<button class="ghost tu_invite" type="button" ${u.email?"":"disabled"}>Email invite</button>` : ""}
+        ${!owner ? `<button class="ghost tu_new" type="button" title="Old link stops working">New link</button>
+          <button class="ghost tu_del" type="button" title="Remove access">&times;</button>` : ""}
+      </td></tr>`;
+  }
+  h += `</tbody></table></div>`;
+  if(!d.base_url) h += `<div class="muted" style="margin-top:8px">Links appear once sharing is on.</div>`;
+  $("t_people").innerHTML = h;
+
+  $("t_smtp_user").value = S.smtp_user || "";
+  $("t_smtp_pass").placeholder = S.smtp_password_set ? "saved (leave blank to keep)" : "16-letter app password";
+  $("t_from_name").value = S.mail_from_name || "";
+  $("t_smtp_host").value = S.smtp_host || "";
+  $("t_smtp_port").value = S.smtp_port || "";
+  if(!$("t_mail_note").dataset.keep) $("t_mail_note").textContent = d.mail_ready ? "Email is set up." : "Email is not set up yet.";
+}
+async function loadTeam(){
+  $("out").innerHTML = "";
+  try{ renderTeam(await (await fetch("/api/team")).json()); }
+  catch(e){ $("t_people").textContent = e.message; }
+}
+function mailNote(t, keep){ $("t_mail_note").textContent = t; $("t_mail_note").dataset.keep = keep ? "1" : ""; }
+document.addEventListener("click", async e => {
+  const b = e.target.closest("#team-panel button, #team-panel a#t_reload, #t_daily");
+  if(!b) return;
+  if(b.id === "t_daily"){ b.classList.toggle("on"); return; }
+  e.preventDefault();
+  const tr = b.closest("tr"), id = tr && tr.dataset.id;
+  const was = b.textContent;
+  const busy = t => { b.disabled = true; b.innerHTML = `<span class="spin"></span>${t}`; };
+  try{
+    if(b.id === "t_reload") return loadTeam();
+    if(b.id === "t_start"){ busy("Starting"); return renderTeam(await teamPost("/api/team/tunnel", {action:"start"})); }
+    if(b.id === "t_stop"){ busy("Stopping"); return renderTeam(await teamPost("/api/team/tunnel", {action:"stop"})); }
+    if(b.id === "t_fixed_save"){
+      renderTeam(await teamPost("/api/team/settings", {public_url: $("t_public").value, tunnel_token: $("t_token").value}));
+      $("t_token").value = ""; b.textContent = "Saved \u2713 - press Stop then Start sharing"; return;
+    }
+    if(b.id === "t_fixed_clear"){
+      $("t_public").value = "";
+      return renderTeam(await teamPost("/api/team/settings", {public_url: "", clear: ["public_url", "tunnel_token"]}));
+    }
+    if(b.id === "t_add"){
+      const name = $("t_name").value.trim();
+      if(!name){ $("t_name").focus(); return; }
+      renderTeam(await teamPost("/api/team/add", {name, email: $("t_email").value.trim(), daily_email: $("t_daily").classList.contains("on")}));
+      $("t_name").value = ""; $("t_email").value = ""; return;
+    }
+    if(b.id === "t_mail_save"){
+      renderTeam(await teamPost("/api/team/settings", {smtp_user: $("t_smtp_user").value, smtp_password: $("t_smtp_pass").value,
+        mail_from_name: $("t_from_name").value, smtp_host: $("t_smtp_host").value, smtp_port: $("t_smtp_port").value}));
+      $("t_smtp_pass").value = ""; mailNote("Saved.", true); return;
+    }
+    if(b.id === "t_send_me" || b.id === "t_send_all"){
+      const me = TEAM.users.find(u => u.role === "owner");
+      if(b.id === "t_send_me" && !(me && me.email)){ mailNote("Put your own email on your row under People first, then Save.", true); return; }
+      if(b.id === "t_send_all" && !confirm("Email today's update to everyone with Daily email on?")) return;
+      busy("Sending");
+      const r = await teamPost("/api/team/send-daily", b.id === "t_send_me" ? {id: me.id} : {});
+      mailNote(r.sent.length ? `Sent "${r.subject}" to ${r.sent.join(", ")}.` +
+        (r.failed.length ? ` Failed: ${r.failed.map(f => f.email).join(", ")}.` : "") : (r.note || "Nothing sent."), true);
+      return renderTeam(r.team);
+    }
+    if(!id) return;
+    if(b.classList.contains("tu_save")){
+      renderTeam(await teamPost("/api/team/update", {id, name: tr.querySelector(".tu_name").value,
+        email: tr.querySelector(".tu_email").value, daily_email: tr.querySelector(".tu_daily").checked}));
+      return;
+    }
+    if(b.classList.contains("tu_copy")){
+      const ok = await copyText(b.dataset.link);
+      b.textContent = ok ? "Copied \u2713" : was; setTimeout(() => b.textContent = was, 1800); return;
+    }
+    if(b.classList.contains("tu_invite")){
+      busy("Sending");
+      const r = await teamPost("/api/team/invite", {id});
+      mailNote(`Invite sent to ${r.sent.join(", ")}.`, true);
+      return renderTeam(r.team);
+    }
+    if(b.classList.contains("tu_new")){
+      if(!confirm("Make a new link? The old one stops working straight away.")) return;
+      return renderTeam(await teamPost("/api/team/link", {id}));
+    }
+    if(b.classList.contains("tu_del")){
+      if(!confirm("Remove this person? Their link stops working straight away.")) return;
+      return renderTeam(await teamPost("/api/team/remove", {id}));
+    }
+  }catch(err){
+    mailNote(err.message, true);
+    if(b.isConnected){ b.disabled = false; b.textContent = was; }
+  }
+});
+
 $("go").onclick = run;
 $("address").addEventListener("keydown", e => { if(e.key==="Enter") run(); });
 $("asking").addEventListener("keydown", e => { if(e.key==="Enter") run(); });
-boot().then(bootCounties).then(loadSkips);
+loadMe().then(boot).then(bootCounties).then(loadSkips).then(refreshDueBadge);
 </script>
 </body>
 </html>

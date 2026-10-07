@@ -6,7 +6,17 @@ assumptions in the model into explicit items to verify before offering.
 """
 from __future__ import annotations
 
+import re
+
 # Asking price this far below the comp-implied value per sqft is a condition signal.
+AUCTION_RE = re.compile(r"\bauction\b|\bopening bid\b|\bminimum bid\b|\bno reserve\b|\bsells absolute\b",
+                        re.I)
+
+
+def is_auction_listing(subject: dict) -> bool:
+    return bool(AUCTION_RE.search(subject.get("description") or ""))
+
+
 DEEP_DISCOUNT_RATIO = 0.60
 SEVERE_DISCOUNT_RATIO = 0.45
 
@@ -23,8 +33,11 @@ def build(result: dict) -> list[dict]:
     def add(level, title, detail):
         flags.append({"level": level, "title": title, "detail": detail})
 
+    is_auction = is_auction_listing(subj)
+
     # --- Pricing anomaly: the single most important flag --------------------
-    if asking and sqft and arv.get("arv_psf"):
+    # (An auction's list price is an opening bid, so a deep "discount" means nothing.)
+    if asking and sqft and arv.get("arv_psf") and not is_auction:
         ask_psf = asking / sqft
         ratio = ask_psf / arv["arv_psf"]
         if ratio < SEVERE_DISCOUNT_RATIO:
@@ -153,6 +166,42 @@ def build(result: dict) -> list[dict]:
         add("info", "Listing has been sitting",
             f"{dom:.0f} days on market. Stale listings carry negotiating leverage - "
             "a low offer is more likely to be entertained.")
+
+    # --- Auctions: the list price is an opening bid, and fees come on top --
+    desc = subj.get("description") or ""
+    if is_auction:
+        mao = (result.get("offer") or {}).get("mao")
+        premium = 0.10
+        m = re.search(r"(\d{1,2}(?:\.\d)?)\s*%\s*buyer'?s?\s*premium", desc, re.I)
+        if m:
+            premium = float(m.group(1)) / 100
+        bid = mao / (1 + premium) if mao else None
+        absolute = bool(re.search(r"no reserve|sells absolute|absolute auction", desc, re.I))
+        add("high", "Auction - the asking price is an opening bid",
+            "The listed price is where bidding starts, not where it ends"
+            + (", and it sells absolute with no reserve, so it will sell to the highest bidder"
+               if absolute else "")
+            + f". Auctions usually add a buyer's premium ({premium * 100:.0f}% assumed"
+            + (" from the listing" if m else "; check the terms") + ") on top of the hammer price"
+            + (f", so your maximum bid is about ${bid:,.0f}, not ${mao:,.0f}." if bid else ".")
+            + " Read the auction terms for deposit, closing deadline and inspection rights - "
+              "most auction sales are as-is with no financing contingency.")
+
+    # --- As-is range: is the seller pricing it as if it were fixed? ------
+    # The as-is *range* is well calibrated (it holds the real price about half
+    # the time, as an interquartile range should); a single as-is figure is
+    # not, so only the conservative top of the range is used here.
+    asis_hi = arv.get("as_is_high")
+    if asking and asis_hi and asking > asis_hi:
+        add("medium", "Asking price is above as-is value",
+            f"Unrenovated homes like this nearby sell for roughly "
+            f"${arv.get('as_is_low', 0):,.0f}-${asis_hi:,.0f}. The seller is pricing it as "
+            "if it were already fixed up. Use the as-is comps in your offer conversation.")
+    if arv.get("renovated_comps_used") == 0:
+        add("medium", "No renovated sales among the comps",
+            "None of the comparable sales describe a renovated home, so the ARV is a "
+            "neighbourhood average and probably understates what a finished flip fetches. "
+            "Look for a recent flip nearby to anchor the resale price.")
 
     # --- County tax roll: is the owner actually paying? -------------------
     tr = result.get("tax_roll") or {}

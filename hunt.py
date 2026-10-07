@@ -36,6 +36,20 @@ def main():
     p.add_argument("--exclude", metavar="PLACES",
                    help='towns/counties to skip everywhere, e.g. --exclude "Chelsea, Nowata" '
                         '(replaces the list; "" clears it)')
+    p.add_argument("--buyer", nargs="+", metavar="FIELD",
+                   help='your details for owner letters: --buyer "Name" "phone" ["email"] ["company"]')
+    p.add_argument("--letters", type=int, metavar="N",
+                   help="write owner letters + a mail-merge CSV for the top N tax leads")
+    p.add_argument("--pipeline", action="store_true", help="list the deals you are working")
+    p.add_argument("--import-roll", metavar="FILE",
+                   help="score an assessor parcel roll (CSV/XLSX from an Open Records request)")
+    p.add_argument("--roll", action="store_true", help="letters: only assessor-roll leads")
+    p.add_argument("--focus-only", action="store_true",
+                   help="letters: only leads inside the focus school districts")
+    p.add_argument("--flip-backtest", action="store_true",
+                   help="value recent local flips as of their purchase day; score past ones that have sold")
+    p.add_argument("--accuracy", nargs="*", metavar="COUNTY",
+                   help="backtest the ARV against real renovated sales (default: region counties)")
     p.add_argument("--daily", action="store_true",
                    help="run leads + deal scan, diff against the last run, write reports/")
     p.add_argument("--since", type=int, metavar="DAYS",
@@ -43,7 +57,106 @@ def main():
     p.add_argument("--open", action="store_true", help="open the HTML report when done")
     p.add_argument("--verify-new", type=int, default=8,
                    help="daily: comp-verify this many NEW deal candidates")
+    p.add_argument("--email", action="store_true",
+                   help="daily: email the update to everyone with the daily email on (Team tab)")
+    p.add_argument("--email-now", action="store_true",
+                   help="email the last day's changes now, without running a scan")
     args = p.parse_args()
+
+    if args.email_now:
+        return send_email(history.since(1, source="leads"), history.since(1, source="deals"))
+
+    if args.flip_backtest:
+        import pandas as _pd
+        from flipcomp import backtest as _bt
+        done = _bt.check_flips()
+        if len(done):
+            print(f"  {len(done)} tracked flips have sold. App ARV on purchase day vs actual sale: "
+                  f"median {done['arv_vs_sold_pct'].median():+.1f}%, within 10% "
+                  f"{(done['arv_vs_sold_pct'].abs() <= 10).mean() * 100:.0f}%; flipper's ask vs sale "
+                  f"{done['ask_vs_sold_pct'].median():+.1f}%")
+        else:
+            print("  No tracked flips have sold yet.")
+        frames = [_bt.find_flips(c["key"]) for c in regions.resolve(args.county, not args.only, args.metro)]
+        flips = _pd.concat(frames, ignore_index=True).drop_duplicates(subset=["property_id"]) if frames else _pd.DataFrame()
+        res = _bt.run_flips(flips, progress=lambda m: print(f"  .. {m}", file=sys.stderr))
+        print(f"  {len(res)} current flips valued; {_bt.save_flips(res)} newly tracked.")
+        if len(res):
+            print(f"  App ARV vs flipper's ask {res['arv_vs_ask_pct'].median():+.1f}% | app max offer vs price paid "
+                  f"{res['mao_vs_buy_pct'].median():+.1f}% | app would have bought {res['app_would_buy'].mean() * 100:.0f}%")
+        return
+
+    if args.accuracy is not None:
+        from flipcomp import accuracy as _acc
+        keys = args.accuracy or [c["key"] for c in regions.resolve(args.county, not args.only, args.metro)]
+        for k in keys:
+            try:
+                rec = _acc.measure(k, progress=lambda m: print(f"  .. {m}", file=sys.stderr))
+                print(f"  {k:<12} {_acc.describe(rec)}")
+            except Exception as exc:
+                print(f"  {k:<12} could not backtest: {exc}")
+        return
+
+    if args.buyer:
+        from flipcomp import prefs as _prefs
+        keys = ["buyer_name", "buyer_phone", "buyer_email", "buyer_company"]
+        saved = _prefs.save_buyer(**dict(zip(keys, args.buyer)))
+        print("  Letters will be signed:", ", ".join(v for v in saved.values() if v))
+        return
+
+    if args.import_roll:
+        from flipcomp import roll_import as _ri
+        with open(args.import_roll, "rb") as fh:
+            res = _ri.import_roll(fh.read(), args.import_roll,
+                                  None if args.county == regions.DEFAULT_REGION else args.county)
+        if res.get("error"):
+            print("  " + res["error"])
+            return
+        d = history.record(res["leads"], "roll")
+        print(f"  {res['rows']:,} parcels read -> {res['count']:,} pre-market leads "
+              f"({res['in_focus']:,} in focus districts); {len(d['new'])} new since last import")
+        print("  signals: " + ", ".join(f"{k} {v:,}" for k, v in sorted(res["signal_counts"].items(), key=lambda x: -x[1])))
+        for l in res["leads"][:25]:
+            print(f"  {l['score']:>3}  {l['address'][:34]:<34} {l['owner'][:30]:<30} {l.get('school') or '':<16} "
+                  f"{', '.join(l['tags'])}")
+        print("  Letters: python hunt.py --letters 100 --roll --open")
+        return
+
+    if args.letters:
+        from flipcomp import letters as _letters
+        kinds = ("roll",) if getattr(args, "roll", False) else ("tax", "roll")
+        rows = history.top_tax_leads(args.letters,
+                                     None if args.county == regions.DEFAULT_REGION else args.county,
+                                     kinds, args.focus_only)
+        if not rows:
+            print("  No tracked tax leads with mailing addresses yet. Run: python hunt.py --daily")
+            return
+        os.makedirs(report.REPORT_DIR, exist_ok=True)
+        import datetime as _dt
+        stamp = _dt.date.today().isoformat()
+        hp = os.path.join(report.REPORT_DIR, f"letters-{stamp}.html")
+        cp = os.path.join(report.REPORT_DIR, f"mailers-{stamp}.csv")
+        with open(hp, "w", encoding="utf-8") as fh:
+            fh.write(_letters.letters_document(rows))
+        with open(cp, "w", encoding="utf-8", newline="") as fh:
+            fh.write(_letters.mail_merge_csv(rows))
+        print(f"  {len(rows)} letters: {hp}")
+        print(f"  Mail-merge CSV: {cp}")
+        if args.open:
+            webbrowser.open(hp)
+        return
+
+    if args.pipeline:
+        from flipcomp import pipeline as _pl
+        sm = _pl.summary()
+        print("  " + "  ".join(f"{label}: {sm['counts'][k]}" for k, label in sm["stages"]))
+        print(f"  {sm['overdue']} overdue, {sm['due_today']} due today")
+        print()
+        for d in _pl.list_deals():
+            print(f"  {d['stage']:<14} {(d.get('next_follow_up') or ''):<11} "
+                  f"{(d.get('address') or '')[:44]:<44} {d.get('owner') or ''}  "
+                  f"offer {money(d.get('offer'))}  max {money(d.get('mao'))}")
+        return
 
     if args.exclude is not None:
         from flipcomp import prefs as _prefs
@@ -240,12 +353,46 @@ def daily(args):
                 annotated.append({**n, "kind": "deal"})
         history.annotate("deals", annotated)
 
+    # The best new listings in the target districts get a full comp too, so the
+    # email and report show ARV and max offer for them, not just the asking price.
+    focus_new = sorted((n for n in leads_diff.get("new", []) if n.get("school_district")
+                        and n.get("kind") in ("listed", "expired") and n.get("price")),
+                       key=lambda n: -(n.get("score") or 0))[:args.verify_new]
+    if focus_new and args.verify_new:
+        log(f"Comp-verifying {len(focus_new)} new Owasso/Collinsville leads")
+        by_addr = {v["address"]: v for v in search.verify(focus_new, top=len(focus_new), progress=log)}
+        done = []
+        for n in focus_new:
+            v = by_addr.get(n.get("address"))
+            if v and v.get("verified"):
+                n.update({"verdict": v["verdict"], "est_arv": v["arv"], "mao": v["mao"],
+                          "est_mao": v["mao"] if v["feasible"] else 0})
+                done.append(n)
+        history.annotate("leads", done, fields=("verdict", "est_arv", "est_mao", "mao"))
+
     text = report.build_text(leads_diff, deals_diff)
     print(text)
     path = report.write(report.build_html(leads_diff, deals_diff))
     print(f"\n  Report: {path}")
+    if args.email:
+        send_email(leads_diff, deals_diff)
     if args.open:
         webbrowser.open(path)
+
+
+def send_email(leads_diff, deals_diff):
+    from flipcomp import mailer
+    try:
+        res = mailer.send_daily(leads_diff, deals_diff)
+    except mailer.MailError as exc:
+        print(f"  Email not sent: {exc}")
+        return
+    if res["sent"]:
+        print(f"  Emailed \"{res['subject']}\" to {', '.join(res['sent'])}")
+    else:
+        print(f"  Email not sent: {res.get('note') or 'no recipients'}")
+    for f in res["failed"]:
+        print(f"  Email to {f['email']} failed: {f['error']}")
 
 
 if __name__ == "__main__":

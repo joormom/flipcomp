@@ -11,3 +11,10 @@ prefs.json
 __pycache__/
 *.pyc
 .venv/
+
+# deals you are working: owner names and phone numbers
+pipeline.json
+
+# partners' invite links and the email password
+team.json
+team.json.tmp

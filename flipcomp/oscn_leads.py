@@ -287,6 +287,9 @@ def cross_reference(cases: list[dict], county: str, max_lookups: int = 60) -> li
         c["parcels"] = []
         if c["score"] < 40 or not c["people"]:
             continue
+        case_county = (c.get("county") or county).lower()
+        if case_county == "tulsa":
+            continue  # Tulsa County is not on the shared treasurer system
         seen = set()
         for person in c["people"][:3]:
             last, first = _name_parts(person)
@@ -295,7 +298,7 @@ def cross_reference(cases: list[dict], county: str, max_lookups: int = 60) -> li
             seen.add((last, first))
             lookups += 1
             try:
-                recs = taxroll.lookup_owner(county, last, first)
+                recs = taxroll.lookup_owner(case_county, last, first)
             except taxroll.TaxRollError:
                 continue
             real = [r for r in recs if r["type"] == "Real Estate" and r["property_id"]]

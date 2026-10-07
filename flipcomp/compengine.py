@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from . import condition as cond
 from .data import row_to_dict
 from .geo import haversine_mi
 
@@ -57,6 +58,32 @@ SEARCH_TIERS = [
     (4.00, 0.45, 2, 18),
 ]
 TARGET_COMPS = 8
+
+# Weighting and reconciliation. Set by backtest; see backtest.py.
+DIST_FALLOFF_MI = 0.5
+HALF_LIFE_MONTHS = 12.0
+ADJ_PENALTY = 3.0
+MAX_USED = 12
+ARV_QUANTILE = 0.50
+TREND_METHOD = "r2"     # see estimate_market_trend
+
+# What a confidence score means in practice: share of renovated sales whose
+# ARV landed within 10% / 20% of the real price, from a time-ordered backtest
+# of 1,658 sales across Washington, Rogers, Osage and the Owasso and
+# Collinsville school districts (Oct 2026). (low, high, within10, within20)
+CONFIDENCE_CALIBRATION = [
+    (0, 50, 31.8, 45.5),
+    (50, 60, 40.3, 70.1),
+    (60, 70, 44.4, 75.5),
+    (70, 80, 57.8, 86.6),
+    (80, 90, 80.6, 96.5),
+    (90, 101, 97.1, 100.0),
+]
+
+# Month-of-sale effect on renovated sales, % vs the annual average. Empty =
+# off. Measured from three years of Washington, Rogers and Osage sales:
+# spring and early summer run ~4% above winter. See backtest.py.
+SEASONAL: dict[int, float] = {}
 MIN_COMPS = 3
 
 RESIDENTIAL_STYLES = {
@@ -85,7 +112,28 @@ def _months_between(sold, today) -> float:
     return max(0.0, (today - sold).days / 30.44)
 
 
-def prepare_pool(pool: pd.DataFrame, subject: dict) -> pd.DataFrame:
+def drop_bulk_sales(df: pd.DataFrame, price_col: str = "sale_price",
+                    date_col: str = "sold_date") -> pd.DataFrame:
+    """Remove portfolio sales: many houses recorded at one total price.
+
+    When an investor buys a bundle, the whole package price is often stamped
+    on every parcel, so a $40k house shows a $790,000 'sale'. Around 10% of
+    recorded sales in older Bartlesville neighbourhoods are these. Three or
+    more different properties at the identical price on the identical day is
+    a bundle; a pair is treated as one only when the price is far above the
+    local norm, since two genuine sales can coincide.
+    """
+    if df.empty or price_col not in df.columns or date_col not in df.columns:
+        return df
+    day = pd.to_datetime(df[date_col], errors="coerce").dt.date
+    key = df[price_col].astype(float).round(0).astype(str) + "|" + day.astype(str)
+    size = key.map(key.value_counts())
+    median_price = float(df[price_col].median()) if len(df) else 0.0
+    bulk = (size >= 3) | ((size == 2) & (df[price_col] >= 2.0 * median_price))
+    return df[~bulk.fillna(False)]
+
+
+def prepare_pool(pool: pd.DataFrame, subject: dict, as_of=None) -> pd.DataFrame:
     """Clean the raw sold pool down to usable, comparable residential sales."""
     df = pool.copy()
 
@@ -140,22 +188,35 @@ def prepare_pool(pool: pd.DataFrame, subject: dict) -> pd.DataFrame:
     if df.empty:
         raise CompError("No valid residential sales in this market after cleaning.")
 
+    df = drop_bulk_sales(df)
+    if df.empty:
+        raise CompError("No valid residential sales in this market after cleaning.")
+
     df["psf"] = df["sale_price"] / df["sqft"]
+    if "condition" not in df.columns:  # a caller may have classified the pool already
+        df["condition"] = (df["text"] if "text" in df.columns else pd.Series("", index=df.index))             .apply(cond.classify)
 
     # Trim price-per-sqft outliers (teardowns, estate sales, intra-family deeds).
     lo, hi = df["psf"].quantile([0.05, 0.95])
     if pd.notna(lo) and pd.notna(hi) and hi > lo:
         df = df[df["psf"].between(lo, hi)]
 
-    today = pd.Timestamp(dt.date.today())
+    # as_of lets a backtest value a house on a past date using only the sales
+    # that had happened by then -- anything later would be seeing the future.
+    today = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp(dt.date.today())
+    df = df[df["sold_date"] < today]
     df["months_ago"] = df["sold_date"].apply(lambda d: _months_between(d, today))
     df = df[df["months_ago"] <= 24]
+    if df.empty:
+        raise CompError("No sales before the valuation date.")
 
-    df["distance_mi"] = df.apply(
-        lambda r: haversine_mi(subject["latitude"], subject["longitude"],
-                               r["latitude"], r["longitude"]),
-        axis=1,
-    )
+    # Vectorised haversine: identical result, two orders of magnitude faster
+    # than a row-wise apply, which matters once a backtest runs it thousands of times.
+    lat1, lon1 = np.radians(float(subject["latitude"])), np.radians(float(subject["longitude"]))
+    lat2, lon2 = np.radians(df["latitude"].to_numpy(float)), np.radians(df["longitude"].to_numpy(float))
+    a = (np.sin((lat2 - lat1) / 2) ** 2
+         + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2)
+    df["distance_mi"] = 2 * 3958.7613 * np.arcsin(np.sqrt(a))
     return df.reset_index(drop=True)
 
 
@@ -170,6 +231,12 @@ def estimate_market_trend(df: pd.DataFrame) -> float:
         return 0.0
     x = sub["months_ago"].to_numpy(dtype=float)
     y = np.log(sub["psf"].to_numpy(dtype=float))
+    if TREND_METHOD == "zip_tstat" and "zip_code" in sub.columns:
+        # Measure each sale against its own ZIP's norm first. Otherwise a month
+        # with more sales in cheap areas reads as a falling market.
+        z = sub["zip_code"].astype(str).to_numpy()
+        ys = pd.Series(y)
+        y = (ys - ys.groupby(z).transform("median")).to_numpy()
     if np.ptp(x) < 3:
         return 0.0
     try:
@@ -181,16 +248,27 @@ def estimate_market_trend(df: pd.DataFrame) -> float:
     if not math.isfinite(monthly):
         return 0.0
 
-    # Scatter in individual home prices dwarfs the time signal, so an
-    # unshrunk slope routinely implies double-digit annual appreciation that
-    # is really just noise. Shrink toward zero by the share of variance the
-    # fit actually explains: a weak fit contributes almost no time adjustment.
+    # Scatter in individual home prices dwarfs the time signal, so a raw slope
+    # can imply double-digit appreciation that is really noise. Two ways to
+    # shrink it:
+    #   'r2'    by the share of variance the fit explains. Safe, but in a
+    #           cross-section R^2 is tiny even when the trend is real, so it
+    #           all but switches the time adjustment off.
+    #   'tstat' by how sure we are the slope is not zero: t^2 / (t^2 + 4),
+    #           about half weight at t=2 and nearly full at t=5+. Real trends
+    #           in big pools survive; noise in small ones does not.
     resid = y - (slope * x + intercept)
     ss_res = float(np.sum(resid ** 2))
-    ss_tot = float(np.sum((y - y.mean()) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    r2 = max(0.0, min(1.0, r2))
-    monthly *= r2
+    if TREND_METHOD in ("tstat", "zip_tstat"):
+        n = len(x)
+        sxx = float(np.sum((x - x.mean()) ** 2))
+        se = math.sqrt(ss_res / max(n - 2, 1) / sxx) if sxx > 0 else math.inf
+        t = abs(slope) / se if se and math.isfinite(se) else 0.0
+        monthly *= t * t / (t * t + 4.0)
+    else:
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        monthly *= max(0.0, min(1.0, r2))
 
     return max(-0.008, min(0.008, monthly))  # +/-0.8%/mo (~10%/yr) ceiling
 
@@ -214,6 +292,10 @@ def select_comps(df: pd.DataFrame, subject: dict):
                 "max_months_old": max_months,
                 "relaxed": radius > SEARCH_TIERS[0][0],
             }
+            ti = SEARCH_TIERS.index((radius, sqft_tol, bed_delta, max_months))
+            sel = _supplement(df, sel, subject, ti, criteria, "renovated", MIN_RENOVATED)
+            sel = _supplement(df, sel, subject, ti, criteria, "distressed",
+                              cond.MIN_DISTRESSED_FOR_ASIS)
             return sel.copy(), criteria
 
     # Nothing hit the target; fall back to the widest tier we have.
@@ -238,13 +320,60 @@ def select_comps(df: pd.DataFrame, subject: dict):
     }
 
 
-def adjust_comps(sel: pd.DataFrame, subject: dict, monthly_trend: float) -> list:
+MIN_RENOVATED = 3
+
+
+def _supplement(df: pd.DataFrame, sel: pd.DataFrame, subject: dict, tier_idx: int,
+                criteria: dict, label: str, minimum: int) -> pd.DataFrame:
+    """Reach up to two tiers further for comps in a given condition.
+
+    An appraiser does the same: travel a little further for a better-matched
+    sale rather than settle for a closer one in the wrong condition.
+    """
+    have = int((sel["condition"] == label).sum()) if "condition" in sel.columns else 0
+    if have >= minimum:
+        return sel
+    s_sqft = subject.get("sqft") or 0
+    for radius, sqft_tol, _bd, max_months in SEARCH_TIERS[tier_idx + 1: tier_idx + 3]:
+        wide = df[(df["distance_mi"] <= radius) & (df["months_ago"] <= max_months)
+                  & (df["condition"] == label)]
+        if s_sqft:
+            wide = wide[wide["sqft"].between(s_sqft * (1 - sqft_tol), s_sqft * (1 + sqft_tol))]
+        if len(wide) >= minimum:
+            extra = wide[~wide.index.isin(sel.index)]
+            criteria[f"{label}_radius_mi"] = radius
+            return pd.concat([sel, extra])
+    return sel
+
+
+def _local_outliers(sel: pd.DataFrame) -> pd.DataFrame:
+    """Drop comps wildly out of line with their own neighbours.
+
+    The pool-wide trim keeps the top and bottom 5% county-wide, which a
+    cheap neighbourhood can sit entirely inside. Judged against the comp set
+    itself, a sale at 3x or a third of the local price per sqft is a data
+    error, a teardown or a land deal -- not a comparable.
+    """
+    if len(sel) < 5:
+        return sel
+    med = float(sel["psf"].median())
+    keep = sel[sel["psf"].between(med * 0.33, med * 3.0)]
+    return keep if len(keep) >= MIN_COMPS else sel
+
+
+def season_factor(month: int) -> float:
+    return 1.0 + SEASONAL.get(int(month), 0.0) / 100.0
+
+
+def adjust_comps(sel: pd.DataFrame, subject: dict, monthly_trend: float, as_of=None) -> list:
     """Apply paired-sales style adjustments to bring each comp to the subject."""
+    sel = _local_outliers(sel)
     median_price = float(sel["sale_price"].median())
     median_psf = float(sel["psf"].median())
     marginal_psf = median_psf * SQFT_MARGINAL_FACTOR
     land_psf = median_psf * LOT_MARGINAL_FACTOR
 
+    value_month = (pd.Timestamp(as_of) if as_of is not None else pd.Timestamp(dt.date.today())).month
     s_sqft = subject.get("sqft")
     s_beds = subject.get("beds")
     s_fb = subject.get("full_baths")
@@ -261,6 +390,12 @@ def adjust_comps(sel: pd.DataFrame, subject: dict, monthly_trend: float) -> list
         # Time / market movement: bring an older sale forward to today.
         if monthly_trend and r["months_ago"] > 0.5:
             adj["time"] = price * ((1 + monthly_trend) ** r["months_ago"] - 1)
+
+        # Season: a January sale understates what the same house fetches in May.
+        if SEASONAL and pd.notna(r.get("sold_date")):
+            f = season_factor(value_month) / season_factor(r["sold_date"].month)
+            if abs(f - 1) > 1e-6:
+                adj["season"] = price * (f - 1)
 
         # Living area.
         if s_sqft and pd.notna(r["sqft"]):
@@ -328,6 +463,7 @@ def adjust_comps(sel: pd.DataFrame, subject: dict, monthly_trend: float) -> list
             "adjusted_value": round(adjusted),
             "adjusted_psf": round(adjusted / float(r["sqft"]), 2) if r["sqft"] else None,
             "over_adjusted": (gross / price) > GROSS_ADJ_WARN,
+            "condition": r.get("condition") if "condition" in r else "neutral",
         })
         out.append(rec)
 
@@ -338,9 +474,9 @@ def _weight(comp: dict) -> float:
     d = comp["distance_mi"]
     m = comp["months_ago"]
     g = comp["gross_adjustment_pct"] / 100.0
-    w_dist = 1.0 / (1.0 + (d / 0.5) ** 2)       # falls off past half a mile
-    w_time = 0.5 ** (m / 12.0)                   # 12-month half-life
-    w_sim = 1.0 / (1.0 + g * 3.0)                # heavy adjustment -> less trust
+    w_dist = 1.0 / (1.0 + (d / DIST_FALLOFF_MI) ** 2)   # falls off past the falloff distance
+    w_time = 0.5 ** (m / HALF_LIFE_MONTHS)               # recency half-life
+    w_sim = 1.0 / (1.0 + g * ADJ_PENALTY)                # heavy adjustment -> less trust
     return max(w_dist * w_time * w_sim, 1e-6)
 
 
@@ -352,13 +488,35 @@ def _weighted_quantile(values: np.ndarray, weights: np.ndarray, q: float) -> flo
     return float(np.interp(q, cw, v))
 
 
-def reconcile(comps: list, subject: dict) -> dict:
-    """Blend adjusted comp values into a single ARV with a range and confidence."""
+def _condition_estimate(comps: list, table: dict) -> dict | None:
+    """Weighted median and IQR of adjusted values under a condition weighting."""
+    vals, wts = [], []
     for c in comps:
-        c["weight"] = _weight(c)
+        w = c["base_weight"] * table.get(c.get("condition") or "neutral", 1.0)
+        vals.append(c["adjusted_value"])
+        wts.append(max(w, 1e-9))
+    if len(vals) < 2:
+        return None
+    v, w = np.array(vals, float), np.array(wts, float)
+    return {"mid": _weighted_quantile(v, w, 0.5), "low": _weighted_quantile(v, w, 0.25),
+            "high": _weighted_quantile(v, w, 0.75)}
+
+
+def reconcile(comps: list, subject: dict) -> dict:
+    """Blend adjusted comp values into a single ARV with a range and confidence.
+
+    The ARV leans on renovated sales and the as-is value on distressed ones;
+    see condition.py for why mixing them answers neither question.
+    """
+    for c in comps:
+        c["base_weight"] = _weight(c)
+        c["weight"] = c["base_weight"] * cond.ARV_WEIGHT.get(c.get("condition") or "neutral", 1.0)
+
+    counts = {k: sum(1 for c in comps if c.get("condition") == k) for k in cond.LABELS}
+    asis = _condition_estimate(comps, cond.ASIS_WEIGHT)         if counts["distressed"] >= cond.MIN_DISTRESSED_FOR_ASIS else None
 
     comps.sort(key=lambda c: c["weight"], reverse=True)
-    used = comps[:12]  # keep the analysis readable and the tail from dominating
+    used = comps[:MAX_USED]  # keep the analysis readable and the tail from dominating
     tot_w = sum(c["weight"] for c in used)
     for c in used:
         c["weight_pct"] = round(c["weight"] / tot_w * 100, 1)
@@ -366,7 +524,7 @@ def reconcile(comps: list, subject: dict) -> dict:
     values = np.array([c["adjusted_value"] for c in used], dtype=float)
     weights = np.array([c["weight"] for c in used], dtype=float)
 
-    arv = _weighted_quantile(values, weights, 0.50)
+    arv = _weighted_quantile(values, weights, ARV_QUANTILE)
     low = _weighted_quantile(values, weights, 0.25)
     high = _weighted_quantile(values, weights, 0.75)
 
@@ -401,17 +559,36 @@ def reconcile(comps: list, subject: dict) -> dict:
     # the ARV per square foot should sit close to what they actually sold for.
     # A large gap means the adjustments are doing too much work, which is how
     # an ARV drifts above the market without anyone noticing.
-    comp_psf = float(np.median([c["psf"] for c in used if c.get("psf")]))
+    reno_psf = [c["psf"] for c in used if c.get("psf") and c.get("condition") == "renovated"]
+    comp_psf = float(np.median(reno_psf if len(reno_psf) >= 3
+                               else [c["psf"] for c in used if c.get("psf")]))
     raw_median = float(np.median([c["sold_price"] for c in used]))
+
+    band = next(((w10, w20) for lo, hi, w10, w20 in CONFIDENCE_CALIBRATION
+                 if lo <= confidence < hi), (None, None))
 
     s_sqft = subject.get("sqft")
     arv_psf = (arv / s_sqft) if s_sqft else None
     drift = ((arv_psf / comp_psf - 1) * 100) if (arv_psf and comp_psf) else 0.0
 
+    # Without renovated evidence the ARV is really a neighbourhood average,
+    # which understates what a finished flip sells for. Say so.
+    reno_used = sum(1 for c in used if c.get("condition") == "renovated")
+    if reno_used == 0:
+        confidence = round(confidence * 0.85)
+        label = ("High" if confidence >= 75 else "Moderate" if confidence >= 55
+                 else "Low" if confidence >= 35 else "Very low")
+
     return {
         "arv": round(arv),
         "arv_low": round(low),
         "arv_high": round(high),
+        "as_is_value": round(asis["mid"]) if asis else None,
+        "as_is_low": round(asis["low"]) if asis else None,
+        "as_is_high": round(asis["high"]) if asis else None,
+        "renovation_premium": round(arv - asis["mid"]) if asis else None,
+        "condition_counts": counts,
+        "renovated_comps_used": reno_used,
         "arv_psf": round(arv_psf, 2) if arv_psf else None,
         "comp_median_psf": round(comp_psf, 2),
         "price_proxy_share": round(proxy_share * 100),
@@ -419,13 +596,15 @@ def reconcile(comps: list, subject: dict) -> dict:
         "arv_vs_comps_pct": round(drift, 1),
         "confidence": confidence,
         "confidence_label": label,
+        "confidence_within10_pct": band[0],
+        "confidence_within20_pct": band[1],
         "dispersion_pct": round(cv * 100, 1),
         "comp_count": len(used),
         "comps": used,
     }
 
 
-def run_comps(pool: pd.DataFrame, subject: dict) -> dict:
+def run_comps(pool: pd.DataFrame, subject: dict, as_of=None) -> dict:
     """Full comp pipeline: clean -> select -> adjust -> reconcile."""
     if not subject.get("sqft"):
         raise CompError(
@@ -435,10 +614,10 @@ def run_comps(pool: pd.DataFrame, subject: dict) -> dict:
     if subject.get("latitude") is None or subject.get("longitude") is None:
         raise CompError("This property has no coordinates on record; cannot locate comps.")
 
-    clean = prepare_pool(pool, subject)
+    clean = prepare_pool(pool, subject, as_of=as_of)
     trend = estimate_market_trend(clean)
     sel, criteria = select_comps(clean, subject)
-    comps = adjust_comps(sel, subject, trend)
+    comps = adjust_comps(sel, subject, trend, as_of=as_of)
     result = reconcile(comps, subject)
     result["criteria"] = criteria
     result["market_trend_monthly_pct"] = round(trend * 100, 3)

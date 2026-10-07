@@ -59,8 +59,8 @@ def save(store: dict[str, Any]) -> None:
 
 def lead_id(lead: dict) -> str | None:
     kind = lead.get("kind") or "lead"
-    if kind == "tax" and lead.get("property_id"):
-        return f"tax:{lead['county_key']}:{lead['property_id']}"
+    if kind in ("tax", "roll") and lead.get("property_id"):
+        return f"{kind}:{lead.get('county_key')}:{lead['property_id']}"
     key = lead.get("addr_key") or (lead.get("address") or "").strip().lower()
     if not key:
         return None
@@ -84,7 +84,14 @@ def _snapshot(lead: dict) -> dict:
         "implied_value": lead.get("implied_value"),
         "url": lead.get("url") or lead.get("listing_url"),
         "detail_url": lead.get("detail_url"),
+        "mailing_address": lead.get("mailing_address"),
+        "school_district": lead.get("school_district"),
         "land_only": lead.get("land_only"),
+        # for the daily email's property cards
+        "photo": lead.get("photo"),
+        "beds": lead.get("beds"),
+        "baths": lead.get("baths"),
+        "sqft": lead.get("sqft"),
         # deal-scan fields
         "est_arv": lead.get("est_arv"),
         "est_mao": lead.get("est_mao"),
@@ -133,6 +140,18 @@ def record(leads: list[dict], source: str, stats: dict | None = None) -> dict[st
     seen_ids: set[str] = set()
     new, changed, returned = [], [], []
 
+    def group(rec):
+        s = rec["snap"]
+        return (s.get("kind"), s.get("county_key"))
+
+    # How many properties each (kind, county) had going into this run, counted
+    # before anything is touched, so the guard below compares like with like.
+    active_before: dict = {}
+    for lid, rec in items.items():
+        if lid.startswith(source + "|") and not rec.get("dropped_on"):
+            g = group(rec)
+            active_before[g] = active_before.get(g, 0) + 1
+
     for lead in leads:
         lid = lead_id(lead)
         if not lid:
@@ -166,6 +185,22 @@ def record(leads: list[dict], source: str, stats: dict | None = None) -> dict[st
         rec["last_seen"] = today
         rec["runs"] = rec.get("runs", 0) + 1
 
+    # Guard: a source that suddenly returns far less than last time has almost
+    # certainly failed (a site change, a cap, an outage) rather than had most of
+    # its properties sell or pay up overnight. Keep that group as it was.
+    seen_now: dict = {}
+    for lid in seen_ids:
+        g = group(items[lid])
+        seen_now[g] = seen_now.get(g, 0) + 1
+    protected, warnings = set(), []
+    for g, before in active_before.items():
+        now = seen_now.get(g, 0)
+        if before >= 50 and now < before * 0.5:
+            protected.add(g)
+            warnings.append(f"{g[0] or 'leads'} in {g[1] or 'region'}: got {now} this run vs "
+                            f"{before} last time - kept the previous list instead of dropping "
+                            f"{before - now}. Check the source.")
+
     # Anything from this source not seen this run has dropped off.
     dropped = []
     cutoff = (dt.date.today() - dt.timedelta(days=KEEP_DROPPED_DAYS)).isoformat()
@@ -173,6 +208,8 @@ def record(leads: list[dict], source: str, stats: dict | None = None) -> dict[st
         if not lid.startswith(source + "|"):
             continue
         if lid in seen_ids:
+            continue
+        if group(rec) in protected:
             continue
         if not rec.get("dropped_on"):
             rec["dropped_on"] = today
@@ -186,13 +223,14 @@ def record(leads: list[dict], source: str, stats: dict | None = None) -> dict[st
     store["runs"].append({"date": today, "at": dt.datetime.now().isoformat(timespec="seconds"),
                           "source": source, "count": len(seen_ids), "new": len(new),
                           "changed": len(changed), "dropped": len(dropped),
+                          "warnings": warnings,
                           "stats": stats or {}})
     store["runs"] = store["runs"][-400:]
     save(store)
 
     rank = lambda x: -(x.get("score") or x.get("spread") or 0)
     return {
-        "source": source, "date": today, "first_run": first_run,
+        "source": source, "date": today, "first_run": first_run, "warnings": warnings,
         "tracked": len(seen_ids),
         "new": sorted(new, key=rank),
         "changed": sorted(changed, key=rank),
@@ -241,10 +279,12 @@ def annotate(source: str, leads: list[dict], fields: tuple[str, ...] = (
     store = load()
     n = 0
     for lead in leads:
-        lid = lead_id(lead)
-        if not lid:
-            continue
-        rec = store["items"].get(f"{source}|{lid}")
+        # Rows from a diff carry their store key; raw leads are keyed afresh.
+        key = lead.get("id") if lead.get("id") in store["items"] else None
+        if not key:
+            lid = lead_id(lead)
+            key = f"{source}|{lid}" if lid else None
+        rec = store["items"].get(key) if key else None
         if not rec:
             continue
         for f in fields:
@@ -254,6 +294,43 @@ def annotate(source: str, leads: list[dict], fields: tuple[str, ...] = (
     if n:
         save(store)
     return n
+
+
+def top_tax_leads(n: int = 50, county_key: str | None = None,
+                  kinds: tuple[str, ...] = ("tax",), focus_only: bool = False) -> list[dict]:
+    """Strongest tracked off-market leads with a street and mailing address."""
+    from . import prefs as _prefs
+    p = _prefs.load()
+    out = []
+    for lid, rec in load()["items"].items():
+        s = rec["snap"]
+        if s.get("kind") not in kinds or rec.get("dropped_on") or s.get("land_only"):
+            continue
+        if focus_only and not s.get("school_district"):
+            continue
+        if not s.get("address"):
+            continue
+        if county_key and s.get("county_key") != county_key:
+            continue
+        if _prefs.address_excluded(s.get("address"), p) or _prefs.city_excluded(s.get("city"), p):
+            continue
+        out.append({**s, "first_seen": rec["first_seen"]})
+    out.sort(key=lambda x: (-(x.get("score") or 0), -((x.get("tax_owed") or 0) + (x.get("liens_owed") or 0))))
+    # Leads tracked before mailing addresses were kept: recover them from the
+    # tax-roll detail cache (on disk, so this is usually free).
+    from . import taxroll
+    ready = []
+    for row in out:
+        if len(ready) >= n:
+            break
+        if not row.get("mailing_address") and row.get("detail_url"):
+            try:
+                row["mailing_address"] = taxroll.parcel_detail(row["detail_url"]).get("mailing_address")
+            except Exception:
+                pass
+        if row.get("mailing_address"):
+            ready.append(row)
+    return ready
 
 
 def purge_excluded() -> int:

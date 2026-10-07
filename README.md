@@ -168,6 +168,174 @@ statutory 11%), and cached for a month.
 
 ---
 
+## How accurate is it?
+
+Measured with a **time-ordered backtest**: for each renovated sale, the clock
+is wound back to the day before it sold and the engine values it using only
+sales that had already closed. Nothing from the future leaks in.
+
+```bash
+python hunt.py --accuracy          # re-measure; results are quoted on every analysis
+python hunt.py --flip-backtest     # value recent local flips as of their purchase day
+```
+
+Across 1,658 renovated sales (October 2026):
+
+| Area | Sales | Typical error | Within 10% | Bias |
+|---|---|---|---|---|
+| Owasso Public Schools | 470 | 4% | 84% | -0.9% |
+| Collinsville Public Schools | 148 | 5% | 78% | -0.9% |
+| Rogers County | 568 | 6% | 70% | -1.8% |
+| Osage County | 138 | 9% | 54% | -0.3% |
+| Washington County | 334 | 10% | 49% | -3.6% |
+
+The confidence score is calibrated against the same backtest, and every
+analysis says what its score means in practice:
+
+| Confidence | Within 10% | Within 20% |
+|---|---|---|
+| 90+ | 97% | 100% |
+| 80-90 | 81% | 97% |
+| 70-80 | 58% | 87% |
+| 60-70 | 44% | 76% |
+| under 60 | about 38% | about 64% |
+
+What moved the numbers, and what did not:
+
+- **Condition-aware comps.** Listing descriptions are classified renovated,
+  distressed or neither, and the ARV leans on renovated sales (weight tuned to
+  8x by backtest).
+- **Portfolio sales removed.** About 11% of Washington County "sales" were
+  bundles with one package price stamped on every parcel.
+- **Tried and not adopted:** a seasonal adjustment (spring sells ~4% above
+  winter here; it helped recent sales slightly but hurt older ones), a
+  ZIP-normalised market trend (the market is close to flat once seasons are
+  removed), and a dozen other weighting settings. None beat the current
+  engine on held-out sales, so none were switched on.
+
+The engine runs about 1.5% conservative overall - the safe side for a buyer.
+
+**Real flips.** 87 houses local investors bought and relisted (median bought
+$137,000, relisted $309,000): the app's maximum offer on the purchase day was
+a median 6.7% *above* what the investor paid, so it would have let you compete
+for 56% of them. Its ARV ran 12% under the flippers' current asking prices -
+but the flips that expired unsold had cut to within 1.8% of the app's figure.
+The tracker remembers each flip and scores the app against the real sale
+price once it closes.
+
+---
+
+## Three exits for every house
+
+Each analysis now shows the same property three ways:
+
+- **Flip** - the maximum offer to clear your profit target, with a hold period
+  computed from the work and the local market (renovation time by scope +
+  median days on market for renovated sales nearby + a month to close),
+  instead of a flat six months.
+- **Wholesale** - contract at or below the 70%-rule price less a fee, then
+  assign the contract to a flipper. No rehab, no loan.
+- **Rent (BRRRR)** - rent from local rental listings, or HUD Fair Market Rents
+  (FY2026) where listings are thin. The refinance is sized to what the rent
+  actually supports at today's rates - DSCR at the lender's 1.20 floor and
+  at least $150/month cash flow - rather than an automatic 75%, and the call
+  is made on how much cash stays in the deal and what it earns. It also shows
+  the highest price at which the refinance returns every dollar.
+
+Rent, management percentage and refinance rate are editable in the
+assumptions panel.
+
+---
+
+## Working the deals
+
+The **Pipeline** tab tracks what you are doing about each property: stage
+(lead, contacted, talking, offer sent, negotiating, under contract, closed,
+dead), your offer, the owner's phone once you have it, and a dated log.
+Every stage change sets the next follow-up date, and the daily report now
+leads with follow-ups that are due or overdue. Add properties from any
+analysis, property record or lead with one click.
+
+**Owner letters**: set your name and phone once (Pipeline tab, or
+`python hunt.py --buyer "Your Name" "918-555-0100"`), then print letters for
+your open deals or the top tax-delinquent leads, one per page, addressed to
+the mailing address on the tax roll. A mail-merge CSV is available for a
+mail house. The letter deliberately never mentions taxes owed.
+
+```bash
+python hunt.py --letters 50 --open     # top 50 tax leads: letters + CSV in reports/
+python hunt.py --pipeline              # what you are working, and what is due
+```
+
+`pipeline.json` holds owners' names and any phone numbers you add, so it is
+git-ignored along with the cache and reports.
+
+---
+
+## When a data source misbehaves
+
+**Being a light user.** On 5 October 2026 the treasurer's website started
+refusing this connection (403) after several days of heavy testing. The app
+now treats a refusal as a no: it stops for 24 hours, refreshes the county list
+weekly rather than daily, keeps parcel details for four months, and resolves
+at most 60 new parcels per run so the backlog fills in gradually. Address
+lookups are cached so property records keep working through a pause.
+
+
+
+The county treasurer's website changed in September 2026 to return at most
+100 records per request and started rate-limiting. Both are now handled: the
+roll is paged by the server's own record count, requests back off and retry
+on rate limits, and a partial download is refused rather than cached.
+
+More importantly, the history store will not believe a source that suddenly
+returns far less than last time. If any county's leads drop by more than half
+in one run, the previous list is kept and the daily report shows a data
+warning instead of announcing thousands of properties "dropped".
+
+---
+
+## Owasso and Collinsville first
+
+The two focus school districts are searched by their **official boundaries**
+(from the Census Bureau's TIGERweb service), not by ZIP code or city: district
+lines do not follow either. About 70 listings in the Owasso ZIP are not in
+Owasso schools, and some Owasso-schools houses sit in Rogers County.
+
+Every listing, expired listing, tax lead and deal-scan candidate inside the
+districts is tagged, scored up, and shown with a district badge. The daily
+report opens with new leads there, and an "Owasso / Collinsville schools only"
+filter sits on the Find deals and Leads tabs. Analyses of houses in those
+districts quote the district's own measured accuracy.
+
+| Inside the districts | Owasso | Collinsville |
+|---|---|---|
+| Active listings | 321 | 83 |
+| Sold in the last year | 1,051 | 351 |
+
+---
+
+## Before it is listed
+
+See **[docs/pre-market-playbook.md](docs/pre-market-playbook.md)** - how to
+build a stacked list, the Open Records request to send each county assessor
+(ready to copy), how to mail and follow up, and the rules to respect when
+calling, texting or buying from owners in foreclosure.
+
+The assessor roll is the piece no website gives you: every parcel with owner,
+mailing address, homestead status and last sale. Import it and the app scores
+out-of-state owners, 15-25+ year ownership, missing homestead, estates, heirs
+and trusts, and senior freezes - stacked, and scored up in the focus districts.
+
+```bash
+python hunt.py --import-roll tulsa_roll.csv --county tulsa
+python hunt.py --letters 100 --roll --focus-only --open
+```
+
+or **Import assessor roll** on the Leads tab.
+
+---
+
 ## Looking up a house you drove past
 
 `python hunt.py --dossier "717 SW Hickory Ave, Bartlesville, OK"` (or the
@@ -244,6 +412,54 @@ schtasks /create /tn "FlipComp daily" /tr "\"%CD%\daily.bat\"" /sc daily /st 06:
 
 The first run only establishes the baseline. Differences appear from the
 second run on.
+
+### The daily email
+
+`daily.bat` runs with `--email`, so after the morning scan everyone with
+**Daily email** ticked in the Team tab gets a phone-friendly summary:
+follow-ups due, anything new in the Owasso and Collinsville school districts,
+new Find Deals hits and the strongest new leads, each with listing, tax-roll
+and map links and a button carrying that person's own sign-in link.
+
+Set it up once in the **Team** tab: the Gmail address to send from and a Gmail
+**app password** (2-Step Verification on, then Google Account > Security > App
+passwords). Your normal Gmail password will not work. **Send today's email to
+me** sends a test. From the command line, `python hunt.py --email-now` sends
+the last day's changes without scanning.
+
+---
+
+## Sharing it with partners
+
+The app stays on this computer; partners reach it through a private link.
+
+1. Install Cloudflare's tunnel program once:
+   `winget install --id Cloudflare.cloudflared`
+2. Start the app with **`share.bat`** instead of `server.py`. It prints the
+   shared address and your own link for your phone.
+3. In the **Team** tab, add each partner (name and email) and press **Email
+   invite** or **Copy link**.
+
+Every person has their own link. Opening it signs that browser in, and anyone
+without a link gets a "FlipComp is private" page. The check is done by the app
+itself, so it holds whichever tunnel is used. **New link** locks someone's old
+link out, and **Remove** locks the person out. Partners share the pipeline (their
+notes and stage changes are logged with their name) and sign owner letters with
+their own details. Only the owner can manage people, the email settings, the
+skip list, roll imports and deleting deals.
+
+The free quick address (`https://<words>.trycloudflare.com`) changes whenever
+the app restarts, and the daily email always carries everyone's current link.
+For an address that never changes, create a tunnel in the Cloudflare dashboard
+(Zero Trust > Networks > Tunnels) on a domain you own. Point its public hostname
+at `http://127.0.0.1:8777`, and paste the tunnel token and address under **Use a
+fixed address** in the Team tab.
+
+The computer has to be on and awake for partners to use it. To start sharing
+at sign-in: `schtasks /create /tn "FlipComp share" /tr "\"%CD%\share.bat\"" /sc onlogon /f`.
+Long scans run as background jobs that the page polls, so they are not cut
+off by the tunnel's 100-second limit. Invite links and the email password are
+kept in `team.json`, which is git-ignored.
 
 ---
 
@@ -341,13 +557,25 @@ server.py              local web server (stdlib only, no framework)
 cli.py                 command line / batch screening
 static/index.html      the interface
 hunt.py                lead hunter (tax roll, court filings, expired, language)
-daily.bat              scheduled entry point for the daily report
+daily.bat              scheduled entry point for the daily report and email
+share.bat              start the app and share it with invited partners
 reports/               daily HTML reports
 flipcomp/
+  access.py            team members, invite links, sharing and email settings (team.json)
+  tunnel.py            Cloudflare Tunnel runner (quick or fixed address)
+  mailer.py            the daily email and invites
   history.py           run history and diffing
   report.py            daily report rendering
   prefs.py             places to skip, stored in prefs.json
   dossier.py           one-address public-record lookup and contact plan
+  condition.py         renovated / distressed classification from listing text
+  focus.py             Owasso / Collinsville school district boundaries and tagging
+  backtest.py          time-ordered ARV backtest, tuning, real-flip backtest and tracker
+  roll_import.py       assessor parcel roll -> pre-market leads
+  rental.py            rent estimate and BRRRR refinance maths
+  accuracy.py          ARV backtest against real renovated sales
+  pipeline.py          deals you are working, stages and follow-ups
+  letters.py           owner letters and mail-merge lists
   leads.py             lead sources, scoring, cross-referencing
   taxroll.py           county treasurer tax-roll client
   oscn_leads.py        court-record link builder, parser, classifier

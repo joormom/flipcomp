@@ -109,6 +109,8 @@ def row_to_dict(row: pd.Series) -> dict[str, Any]:
             continue
         val = row[col]
         out[col] = _num(val) if col in NUMERIC_COLS else _text(val)
+    txt = row.get("text") if "text" in row.index else None
+    out["description"] = _text(txt)[:2000] if _text(txt) else None
     sold = row.get("last_sold_date")
     out["sold_date"] = None
     try:
@@ -370,24 +372,26 @@ def fetch_sold_pool(subject: dict[str, Any], past_days: int = 365,
 
 # --- geocoding for addresses Realtor.com has never listed -------------------
 
-GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 
 
 def geocode(address: str) -> dict[str, Any] | None:
     """US Census geocoder: free, keyless, and good enough to place a parcel.
 
-    Returns latitude/longitude plus the normalised city, state and ZIP, or
-    None when the address does not resolve.
+    Returns latitude/longitude, the normalised city, state and ZIP, and the
+    county and school district the address officially falls in -- the
+    'geographies' endpoint answers all of it in the one request.
     """
     import requests
 
-    key = f"geocode|{address.strip().lower()}"
+    key = f"geocode2|{address.strip().lower()}"
     hit = _cache_get(key)
     if hit is not None and not hit.empty:
         return hit.iloc[0].to_dict()
     try:
         r = requests.get(GEOCODER_URL, params={
-            "address": address, "benchmark": "Public_AR_Current", "format": "json",
+            "address": address, "benchmark": "Public_AR_Current", "vintage": "Current_Current",
+            "layers": "Counties,Unified School Districts", "format": "json",
         }, timeout=30)
         r.raise_for_status()
         matches = (r.json().get("result") or {}).get("addressMatches") or []
@@ -397,7 +401,12 @@ def geocode(address: str) -> dict[str, Any] | None:
         return None
     m = matches[0]
     comp = m.get("addressComponents") or {}
+    geos = m.get("geographies") or {}
+    county = ((geos.get("Counties") or [{}])[0]).get("NAME")
+    school = ((geos.get("Unified School Districts") or [{}])[0]).get("NAME")
     out = {
+        "county": county,
+        "school_district_name": school,
         "formatted_address": m.get("matchedAddress"),
         "latitude": float(m["coordinates"]["y"]),
         "longitude": float(m["coordinates"]["x"]),

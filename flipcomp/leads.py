@@ -34,7 +34,7 @@ from typing import Any, Callable
 import pandas as pd
 import requests
 
-from . import oscn_leads, prefs, regions, taxroll
+from . import focus, oscn_leads, prefs, regions, taxroll
 from .data import CACHE_DIR, _cached_scrape
 
 warnings.filterwarnings("ignore")
@@ -187,16 +187,29 @@ def listed_signals(counties: list[dict], progress: Progress = None) -> tuple[lis
                 frames.append(df)
         except Exception:
             continue
+    # Focus school districts are searched by their own boundary, wherever
+    # they fall, so Owasso and Collinsville are covered without scanning all
+    # of Tulsa County.
+    try:
+        fdf = focus.listings("for_sale")
+        if not fdf.empty:
+            fdf = fdf.copy()
+            fdf["search_county"] = fdf["county"].astype(str).str.lower().str.replace(" county", "")
+            frames.append(fdf)
+    except Exception as exc:
+        if progress:
+            progress(f"Focus districts unavailable: {exc}")
     if not frames:
         return [], pd.DataFrame()
     active = pd.concat(frames, ignore_index=True)
     if "property_id" in active.columns:
         active = active.drop_duplicates(subset=["property_id"])
+    active = focus.tag(active)
 
     snapshots: dict[str, dict] = {}
-    for c in counties:
-        sub = active[active["search_county"] == c["key"]]
-        snapshots.update(_update_snapshots(c["key"], sub))
+    for ck in active["search_county"].dropna().unique():
+        sub = active[active["search_county"] == ck]
+        snapshots.update(_update_snapshots(str(ck), sub))
 
     leads: list[dict] = []
     for _, r in active.iterrows():
@@ -256,16 +269,22 @@ def listed_signals(counties: list[dict], progress: Progress = None) -> tuple[lis
 
         if not signals:
             continue
+        sd = r.get("school_district") if isinstance(r.get("school_district"), str) else None
+        if sd:
+            signals.append(_focus_signal(sd))
         raw = sum(s["weight"] for s in signals)
         score = min(SCORE_CAP, raw)
         leads.append({
             "kind": "listed", "raw_score": raw,
+            "school_district": sd, "school": focus.label(sd),
+            "latitude": _num(r.get("latitude")), "longitude": _num(r.get("longitude")),
             "address": _s(r.get("formatted_address")) or None,
             "addr_key": _addr_key(r.get("formatted_address")),
             "city": _s(r.get("city")) or None, "zip": _s(r.get("zip_code")) or None,
             "county": _s(r.get("county")) or _s(r.get("search_county")),
             "county_key": _s(r.get("search_county")),
             "url": _s(r.get("property_url")) or None,
+            "photo": _s(r.get("primary_photo")) or None,
             "price": round(price), "sqft": _num(r.get("sqft")),
             "beds": _num(r.get("beds")), "baths": _num(r.get("full_baths")),
             "year_built": _num(r.get("year_built")), "days_on_mls": dom,
@@ -286,15 +305,29 @@ def expired_listings(counties: list[dict], active: pd.DataFrame,
     """
     active_ids = set(active["property_id"].astype(str)) if "property_id" in active.columns else set()
     out: list[dict] = []
-    for c in counties:
+    seen_pids: set[str] = set()
+    sources = list(counties)
+    try:
+        fdf = focus.listings("off_market")
+        if not fdf.empty:
+            sources.append({"key": "_focus", "name": "Focus districts", "_df": fdf})
+    except Exception:
+        pass
+    for c in sources:
         try:
-            df = _cached_scrape(f"search_offmarket|{c['query'].lower()}",
-                                location=c["query"], listing_type="off_market")
+            df = c.get("_df")
+            if df is None:
+                df = _cached_scrape(f"search_offmarket|{c['query'].lower()}",
+                                    location=c["query"], listing_type="off_market")
         except Exception:
             continue
         if df is None or df.empty:
             continue
+        df = focus.tag(df)
         for _, r in df.iterrows():
+            if _s(r.get("property_id")) in seen_pids:
+                continue
+            seen_pids.add(_s(r.get("property_id")))
             pid = _s(r.get("property_id"))
             if pid in active_ids:
                 continue  # re-listed; it will show up in listed signals instead
@@ -322,13 +355,20 @@ def expired_listings(counties: list[dict], active: pd.DataFrame,
                 signals.append({"tag": "below_last_sale", "weight": 15,
                                 "label": f"Was asking below last sale (${last_price:,.0f})",
                                 "evidence": ""})
+            sd = r.get("school_district") if isinstance(r.get("school_district"), str) else None
+            if sd:
+                signals.append(_focus_signal(sd))
+            ck = c["key"] if c["key"] != "_focus" else \
+                _s(r.get("county")).lower().replace(" county", "")
             out.append({
                 "kind": "expired",
+                "school_district": sd, "school": focus.label(sd),
                 "address": _s(r.get("formatted_address")) or None,
                 "addr_key": _addr_key(r.get("formatted_address")),
                 "city": _s(r.get("city")) or None, "zip": _s(r.get("zip_code")) or None,
-                "county": _s(r.get("county")) or c["name"], "county_key": c["key"],
+                "county": _s(r.get("county")) or c["name"], "county_key": ck,
                 "url": _s(r.get("property_url")) or None,
+                "photo": _s(r.get("primary_photo")) or None,
                 "price": round(price), "sqft": _num(r.get("sqft")),
                 "beds": _num(r.get("beds")), "baths": _num(r.get("full_baths")),
                 "year_built": _num(r.get("year_built")),
@@ -341,10 +381,17 @@ def expired_listings(counties: list[dict], active: pd.DataFrame,
     return out
 
 
+
+def _focus_signal(key):
+    return {"tag": "focus_school", "weight": focus.FOCUS_BONUS,
+            "label": f"In {focus.DISTRICTS[key]['name']}",
+            "evidence": "Focus school district - what retail buyers pay up for."}
+
+
 # --- tax delinquency ----------------------------------------------------------
 
 def tax_delinquent(county_key: str, max_details: int = 250,
-                   progress: Progress = None) -> list[dict]:
+                   progress: Progress = None, new_detail_budget: int = 60) -> list[dict]:
     """Parcels behind on property tax, worst first, with addresses resolved."""
     try:
         recs = taxroll.county_unpaid(county_key)
@@ -413,13 +460,19 @@ def tax_delinquent(county_key: str, max_details: int = 250,
 
     leads.sort(key=lambda x: (-x["score"], -(x["tax_owed"] + x["liens_owed"])))
 
-    # Resolve addresses for the strongest, within a request budget.
-    resolved = 0
+    # Resolve addresses for the strongest. Cached parcels are free; new ones
+    # cost a request to the county, so only a few dozen are fetched per run
+    # and the rest fill in over the following days.
+    resolved = fetched = 0
     for lead in leads:
         if resolved >= max_details:
             break
         if not lead["detail_url"]:
             continue
+        if not taxroll.detail_is_cached(lead["detail_url"]):
+            if fetched >= new_detail_budget or taxroll.blocked_until():
+                continue
+            fetched += 1
         try:
             d = taxroll.parcel_detail(lead["detail_url"])
         except taxroll.TaxRollError:
@@ -447,6 +500,25 @@ def tax_delinquent(county_key: str, max_details: int = 250,
     leads = [l for l in leads
              if not prefs.city_excluded(l.get("location_city"), _PREFS())
              and not prefs.address_excluded(l.get("address"), _PREFS())]
+
+    # Which resolved parcels sit in a focus district. The roll has no
+    # coordinates, so geocode only where a district could plausibly be.
+    near = {"OWASSO", "COLLINSVILLE", "CATOOSA", "CLAREMORE", "OOLOGAH", "TALALA",
+            "SPERRY", "SKIATOOK", "TULSA", "VERDIGRIS", "LIMESTONE"}
+    if county_key in ("rogers", "tulsa", "washington"):
+        from .data import geocode
+        for lead in leads:
+            city = (lead.get("location_city") or "").upper()
+            if not lead.get("address") or (city and city not in near):
+                continue
+            g = geocode(f"{lead['address']}, {lead.get('location_city') or ''}, OK")
+            sd = focus.district_of(g["latitude"], g["longitude"]) if g else None
+            if sd:
+                lead["school_district"], lead["school"] = sd, focus.label(sd)
+                lead["signals"].append(_focus_signal(sd))
+                lead["raw_score"] = lead.get("raw_score", lead["score"]) + focus.FOCUS_BONUS
+                lead["score"] = min(SCORE_CAP, lead["score"] + focus.FOCUS_BONUS)
+                lead["tags"] = sorted(set(lead["tags"]) | {"focus_school"})
 
     # Land-only parcels are not flips; push them down without hiding them.
     leads.sort(key=lambda x: (x.get("land_only", False), -x["score"],
@@ -610,6 +682,8 @@ def find_leads(home: str = regions.DEFAULT_REGION, include_adjacent: bool = True
             "tax_3yr": sum(1 for t in tax if t["years_behind"] >= 3),
             "tax_2yr": sum(1 for t in tax if t["years_behind"] == 2),
             "city_liens": sum(1 for t in tax if t["liens_owed"]),
+            "in_focus": {k: sum(1 for l in listed + expired + tax if l.get("school_district") == k)
+                         for k in focus.DEFAULT_FOCUS},
             "listed_and_delinquent": sum(1 for l in listed + expired
                                          if l.get("tax_status") == "delinquent"),
         },
@@ -618,7 +692,13 @@ def find_leads(home: str = regions.DEFAULT_REGION, include_adjacent: bool = True
         "tax": tax,
         "sheriff": sheriff,
         "oscn": {
-            "searches": oscn_leads.suggested_searches(home),
+            # Home county, plus the two counties Owasso and Collinsville schools
+            # sit in. Tulsa files far more cases, so its window is shorter.
+            "searches": oscn_leads.suggested_searches(home)
+            + [{**x, "label": f"Tulsa County (Owasso / Collinsville): {x['label']}"}
+               for x in oscn_leads.suggested_searches("tulsa", days=14)]
+            + ([{**x, "label": f"Rogers County (Owasso east side): {x['label']}"}
+                for x in oscn_leads.suggested_searches("rogers", days=30)] if home != "rogers" else []),
             "note": "Court records need a one-time human check in your browser. Open a "
                     "search, save the page (Ctrl+S, 'Webpage, HTML only') or copy its "
                     "source, and paste it below. The app classifies every case and "

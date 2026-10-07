@@ -34,7 +34,7 @@ def _norm_owner(name: str) -> str:
 
 
 def _split_people(owner: str) -> list[dict]:
-    """'ASKINS, BILL C & JEANNETTE' -> two people sharing a surname."""
+    """'SMITH, JOHN A & MARY' -> two people sharing a surname."""
     owner = _norm_owner(owner)
     if not owner or _ENTITY.search(owner):
         return [{"name": owner, "entity": True}] if owner else []
@@ -111,6 +111,18 @@ def _links(address: str, city: str | None, county_key: str, people: list[dict],
     return out
 
 
+def _tulsa_links(address: str) -> list[dict]:
+    return [
+        {"label": "Tulsa County Assessor property search",
+         "url": "https://assessor.tulsacounty.org/Property/Search",
+         "why": "Owner, mailing address, homestead status, sale history and building details. "
+                "Search the address; Tulsa County is not on the shared treasurer system."},
+        {"label": "Tulsa County Treasurer",
+         "url": "https://www2.tulsacounty.org/treasurer/",
+         "why": "Whether the taxes are paid, and the resale list for three-year delinquencies."},
+    ]
+
+
 def _situation(tax: dict, parcel: dict, listing: dict | None, timeline: list[dict],
                people: list[dict]) -> dict:
     """Read the facts the way an experienced buyer would."""
@@ -120,7 +132,11 @@ def _situation(tax: dict, parcel: dict, listing: dict | None, timeline: list[dic
     absentee = parcel.get("owner_occupied_guess") is False
     entity = any(p.get("entity") for p in people)
 
-    if behind >= 3:
+    if not tax.get("found"):
+        notes.append("Tax status could not be read automatically (the county system is "
+                     "unavailable or not covered). Open the treasurer link to see whether "
+                     "the owner is paying.")
+    elif behind >= 3:
         notes.append(f"{behind} years of unpaid tax: the county can sell it at the June resale. "
                      "The owner is close to losing it for nothing.")
         approach.append("Lead with the tax problem: an offer that clears the county and leaves "
@@ -181,27 +197,40 @@ def build(address: str, county_key: str | None = None) -> dict[str, Any]:
     city = (geo or {}).get("city")
     zip_code = (geo or {}).get("zip_code")
     if not county_key:
-        county_key = regions.DEFAULT_REGION
-        for key, rec in regions.COUNTIES.items():
-            if city and city.lower() == rec["seat"].lower():
-                county_key = key
-                break
+        # The geocoder says which county the address is officially in; Owasso
+        # alone spans two. Fall back to the city-seat table only without it.
+        gc = ((geo or {}).get("county") or "").lower().replace(" county", "").strip()
+        county_key = gc or None
+        if not county_key:
+            county_key = regions.DEFAULT_REGION
+            for key, rec in regions.COUNTIES.items():
+                if city and city.lower() == rec["seat"].lower():
+                    county_key = key
+                    break
 
+    from . import focus
+    sd_key = focus.district_of((geo or {}).get("latitude"), (geo or {}).get("longitude"))
     out: dict[str, Any] = {
         "address": address,
         "normalised": (geo or {}).get("formatted_address"),
         "city": city, "zip": zip_code, "county_key": county_key,
-        "county": regions.COUNTIES.get(county_key, {}).get("name"),
+        "county": regions.COUNTIES.get(county_key, {}).get("name")
+                  or f"{county_key.title()} County, OK",
+        "school_district_name": (geo or {}).get("school_district_name"),
+        "school_district": sd_key, "school": focus.label(sd_key),
         "latitude": (geo or {}).get("latitude"), "longitude": (geo or {}).get("longitude"),
         "sources": [],
     }
+    # Tulsa County runs its own treasurer and assessor systems rather than the
+    # shared one, so its record lives on the county's own sites.
+    tulsa = county_key == "tulsa"
 
     # --- treasurer: owner, mailing address, delinquency, ownership timeline ---
     tax = {"found": False}
     parcel: dict = {}
     rows: list[dict] = []
     parts = taxroll.split_street(address)
-    if parts:
+    if parts and not tulsa:
         try:
             rows = taxroll.lookup_address(county_key, *parts)
             tax = taxroll.delinquency_for_address(county_key, address)
@@ -278,7 +307,8 @@ def build(address: str, county_key: str | None = None) -> dict[str, Any]:
             "estimated_value", "tax", "agent_name", "agent_phones", "agent_email",
             "office_name", "office_phones", "broker_name", "property_url", "days_on_mls")},
         "seen_by_app": seen,
-        "links": _links(address, city, county_key, people, owner, parcel.get("legal")),
+        "links": (_tulsa_links(address) if tulsa else [])
+                 + _links(address, city, county_key, people, owner, parcel.get("legal")),
         "situation": _situation(tax, parcel, listing, timeline, people),
         "generated": dt.datetime.now().isoformat(timespec="seconds"),
     })
